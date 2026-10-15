@@ -157,15 +157,20 @@ smoke_container=""
 curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference?locale=de" | grep -q 'Artio Referenzerweiterung'
 curl --fail --silent "$base/api/v1/marketplace/categories?locale=fr" | grep -q 'Autre'
 
+core_status=0
 if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   core_path=$(cd "$ARTIO_CORE_PATH" && pwd)
   export ARTIO_TEST_EXTENSION_IMAGE_V1=${release_refs[0]}
   export ARTIO_TEST_EXTENSION_IMAGE_V2=${release_refs[1]}
-  (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
+  if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.extensions.PackagedExtensionControllerIntegrationTests \
-    --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls)
-  echo 'Pinned Core versioned admin lifecycle, Docker runtime and packaged controller integration tests passed with Marketplace-published image digests.'
+    --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls); then
+    echo 'Pinned Core Docker runtime, packaged controller and catalog integration checks passed with Marketplace-published image digests.'
+  else
+    core_status=$?
+    echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
+  fi
 fi
 
 rate_limit=${MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
@@ -183,4 +188,5 @@ retry_after=$(curl --silent --dump-header "$package/rate-limit.headers" --output
   exit 1
 }
 
-echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, four digest-pinned main/sidecar artifacts, two immutable release publications with idempotent retries, localized catalog, manifest retrieval, a restricted real plugin health/authenticated invocation/idempotency smoke test, and bounded public API rate limiting. When ARTIO_CORE_PATH is set, Core Docker lifecycle checks also run. Test-local containers, images and files are removed by the exit trap.'
+echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, four digest-pinned main/sidecar artifacts, two immutable release publications with idempotent retries, localized catalog, manifest retrieval, a restricted real plugin health/authenticated invocation/idempotency smoke test, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
+if ((core_status != 0)); then exit "$core_status"; fi
