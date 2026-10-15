@@ -161,7 +161,7 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   core_path=$(cd "$ARTIO_CORE_PATH" && pwd)
   export ARTIO_TEST_EXTENSION_IMAGE_V1=${release_refs[0]}
   export ARTIO_TEST_EXTENSION_IMAGE_V2=${release_refs[1]}
-  (cd "$core_path" && ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
+  (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.extensions.PackagedExtensionControllerIntegrationTests \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls)

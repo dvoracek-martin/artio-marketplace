@@ -39,6 +39,9 @@ jobs:
           publisher_token=$(openssl rand -hex 32)
           zot_password=$(openssl rand -hex 32)
           postgres_password=$(openssl rand -hex 32)
+          echo "::add-mask::$publisher_token"
+          echo "::add-mask::$zot_password"
+          echo "::add-mask::$postgres_password"
           printf '%s\n' "$publisher_token" > secrets/publisher-token.txt
           printf '%s\n' "$zot_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i publisher > secrets/zot.htpasswd
           token_hash=$(printf '%s' "$publisher_token" | sha256sum | cut -d' ' -f1)
