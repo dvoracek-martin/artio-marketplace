@@ -10,6 +10,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      MARKETPLACE_COMPOSE_PROJECT: marketplace-acceptance-${{ github.run_id }}
     permissions:
       contents: read
       security-events: write
@@ -61,19 +63,24 @@ jobs:
           sudo systemctl restart docker
           docker info
       - name: Start Marketplace, Zot and PostgreSQL
-        run: docker compose --env-file .env -f deployment/compose.yaml up --build -d
+        run: docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml up --build -d
       - name: Exercise live Zot ACL, OCI publication and public API
         continue-on-error: true # Keep later SBOM and image scans running if the pinned Core compatibility fixture exposes an upstream failure.
         env:
           ARTIO_CORE_PATH: ${{ github.workspace }}/artio-core
         run: ./scripts/docker-acceptance.sh
+      - name: Restore isolated PostgreSQL, Zot and media backup and smoke-pull a published digest
+        env:
+          MARKETPLACE_RESTORE_DRILL: '1'
+          MARKETPLACE_ENV_FILE: .env
+        run: ./scripts/backup-restore-drill.sh
       - name: Capture diagnostics on failure
         if: failure()
         run: |
           if [ -f .env ]; then
-            docker compose --env-file .env -f deployment/compose.yaml logs --no-color
+            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml logs --no-color
           else
-            docker compose -f deployment/compose.yaml logs --no-color || true
+            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" -f deployment/compose.yaml logs --no-color || true
           fi
       - name: Generate SPDX SBOM for verified image
         if: success()
@@ -105,8 +112,8 @@ jobs:
         if: always()
         run: |
           if [ -f .env ]; then
-            docker compose --env-file .env -f deployment/compose.yaml down -v
+            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml down -v
           else
-            docker compose -f deployment/compose.yaml down -v
+            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" -f deployment/compose.yaml down -v
           fi
 

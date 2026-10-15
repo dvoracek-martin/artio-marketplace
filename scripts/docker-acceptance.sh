@@ -152,7 +152,7 @@ unauthorized_status=$(curl --silent --output /dev/null --write-out '%{http_code}
   -H 'X-Artio-Extension-Api: 1' -H 'Idempotency-Key: marketplace-smoke-denied' \
   -H 'Content-Type: application/json' --data "$invoke" "http://127.0.0.1:$smoke_port/v1/invoke")
 [[ $unauthorized_status == 401 ]] || { echo 'Reference plugin invocation accepted a request without its runtime token.' >&2; exit 1; }
-compose=(docker compose --env-file "${MARKETPLACE_ENV_FILE:-.env}" -f deployment/compose.yaml)
+compose=(docker compose --project-name "${MARKETPLACE_COMPOSE_PROJECT:-deployment}" --env-file "${MARKETPLACE_ENV_FILE:-.env}" -f deployment/compose.yaml)
 "${compose[@]}" stop marketplace >/dev/null
 offline_catalog_status=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/api/v1/marketplace/categories" || true)
 [[ $offline_catalog_status != 200 ]] || { echo 'Marketplace API remained available after its service container was stopped.' >&2; exit 1; }
