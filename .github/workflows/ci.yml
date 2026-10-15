@@ -65,7 +65,12 @@ jobs:
         run: ./scripts/docker-acceptance.sh
       - name: Capture diagnostics on failure
         if: failure()
-        run: docker compose --env-file .env -f deployment/compose.yaml logs --no-color
+        run: |
+          if [ -f .env ]; then
+            docker compose --env-file .env -f deployment/compose.yaml logs --no-color
+          else
+            docker compose -f deployment/compose.yaml logs --no-color || true
+          fi
       - name: Generate SPDX SBOM for verified image
         if: success()
         run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.28.0 artio-marketplace:local -o spdx-json=marketplace.spdx.json
@@ -93,5 +98,10 @@ jobs:
           severity: HIGH,CRITICAL
       - name: Stop ephemeral acceptance stack
         if: always()
-        run: docker compose --env-file .env -f deployment/compose.yaml down -v
+        run: |
+          if [ -f .env ]; then
+            docker compose --env-file .env -f deployment/compose.yaml down -v
+          else
+            docker compose -f deployment/compose.yaml down -v
+          fi
 
