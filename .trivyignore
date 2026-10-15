@@ -1,0 +1,7 @@
+# Time-bounded upstream Zot and Tomcat exceptions reviewed in docs/SECURITY.md.
+CVE-2026-65905 exp:2026-10-30
+CVE-2026-68525 exp:2026-10-30
+CVE-2026-78667 exp:2026-10-30
+CVE-2026-78669 exp:2026-10-30
+CVE-2026-84445 exp:2026-10-30
+CVE-2026-97031 exp:2026-10-30

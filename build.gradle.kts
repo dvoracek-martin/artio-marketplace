@@ -24,6 +24,17 @@ subprojects {
     tasks.withType<JavaCompile>().configureEach { options.encoding = "UTF-8"; options.release = 25 }
     tasks.withType<Test>().configureEach { useJUnitPlatform() }
     dependencies { "testRuntimeOnly"("org.junit.platform:junit-platform-launcher") }
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            val secureVersion = when {
+                requested.group == "com.fasterxml.jackson.core" && requested.name in setOf("jackson-core", "jackson-databind") -> "2.21.7"
+                requested.group == "tools.jackson.core" && requested.name in setOf("jackson-core", "jackson-databind") -> "3.2.3"
+                requested.group?.startsWith("org.apache.tomcat") == true -> "11.0.25"
+                else -> null
+            }
+            if (secureVersion != null) useVersion(secureVersion)
+        }
+    }
     configure<com.diffplug.gradle.spotless.SpotlessExtension> {
         java { googleJavaFormat("1.28.0").reorderImports(true) }
     }

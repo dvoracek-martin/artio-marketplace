@@ -25,7 +25,7 @@ The Marketplace image contains Java and Zot. PostgreSQL is separate. Nginx expos
 
 ## Tests and builds
 
-Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting `MARKETPLACE_PUBLISHER_TOKEN_FILE` and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to the pinned Core checkout to include its real Docker runtime and packaged-controller lifecycle tests. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting `MARKETPLACE_PUBLISHER_TOKEN_FILE` and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to a read-only pinned Core checkout to run isolated runtime/controller contract tests; no deployed or customer Core instance is required. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 ## First manual publication
 

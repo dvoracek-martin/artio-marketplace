@@ -152,6 +152,15 @@ unauthorized_status=$(curl --silent --output /dev/null --write-out '%{http_code}
   -H 'X-Artio-Extension-Api: 1' -H 'Idempotency-Key: marketplace-smoke-denied' \
   -H 'Content-Type: application/json' --data "$invoke" "http://127.0.0.1:$smoke_port/v1/invoke")
 [[ $unauthorized_status == 401 ]] || { echo 'Reference plugin invocation accepted a request without its runtime token.' >&2; exit 1; }
+compose=(docker compose --env-file "${MARKETPLACE_ENV_FILE:-.env}" -f deployment/compose.yaml)
+"${compose[@]}" stop marketplace >/dev/null
+offline_catalog_status=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base/api/v1/marketplace/categories" || true)
+[[ $offline_catalog_status != 200 ]] || { echo 'Marketplace API remained available after its service container was stopped.' >&2; exit 1; }
+curl --fail --silent --show-error "http://127.0.0.1:$smoke_port/health" >/dev/null
+offline_response=$(curl --fail --silent --show-error "http://127.0.0.1:$smoke_port/v1/invoke" "${invoke_headers[@]}" --data "$invoke")
+[[ $offline_response == "$first_response" ]] || { echo 'Installed reference plugin did not keep serving invocation while Marketplace was offline.' >&2; exit 1; }
+"${compose[@]}" start marketplace >/dev/null
+wait_ready
 docker rm --force "$smoke_container" >/dev/null
 smoke_container=""
 curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference?locale=de" | grep -q 'Artio Referenzerweiterung'
@@ -188,5 +197,5 @@ retry_after=$(curl --silent --dump-header "$package/rate-limit.headers" --output
   exit 1
 }
 
-echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, four digest-pinned main/sidecar artifacts, two immutable release publications with idempotent retries, localized catalog, manifest retrieval, a restricted real plugin health/authenticated invocation/idempotency smoke test, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
+echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, four digest-pinned main/sidecar artifacts, two immutable release publications with idempotent retries, localized catalog, manifest retrieval, a restricted real plugin health/authenticated invocation/idempotency smoke test, runtime availability while Marketplace is stopped, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
 if ((core_status != 0)); then exit "$core_status"; fi
