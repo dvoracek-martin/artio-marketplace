@@ -28,6 +28,7 @@ subprojects {
         resolutionStrategy.eachDependency {
             val secureVersion = when {
                 requested.group == "com.fasterxml.jackson.core" && requested.name in setOf("jackson-core", "jackson-databind") -> "2.21.7"
+                requested.group == "com.fasterxml.jackson.core" && requested.name == "jackson-annotations" -> "2.22"
                 requested.group == "tools.jackson.core" && requested.name in setOf("jackson-core", "jackson-databind") -> "3.2.3"
                 requested.group?.startsWith("org.apache.tomcat") == true -> "11.0.25"
                 else -> null
