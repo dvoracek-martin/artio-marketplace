@@ -10,7 +10,7 @@ Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and disc
 - Combined Marketplace + Zot container and PostgreSQL Compose deployment.
 - Backoffice UI, payments, and licensing are intentionally out of scope.
 
-See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATIBILITY.md), [OpenAPI](marketplace-contract/openapi.yaml), and the [publishing guide](docs/PUBLISHING.md).
+See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATIBILITY.md), the [acceptance evidence](docs/ACCEPTANCE.md), [OpenAPI](marketplace-contract/openapi.yaml), and the [publishing guide](docs/PUBLISHING.md).
 
 ## Run locally with Docker
 
@@ -25,7 +25,7 @@ The Marketplace image contains Java and Zot. PostgreSQL is separate. Nginx expos
 
 ## Tests and builds
 
-Run `./gradlew clean build` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Docker acceptance scripts and environment requirements are documented in [operations](docs/OPERATIONS.md). Do not claim Docker acceptance passed unless it was run against the built image and a real Zot/PostgreSQL stack.
+Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting `MARKETPLACE_PUBLISHER_TOKEN_FILE` and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to the pinned Core checkout to include its real Docker runtime and packaged-controller lifecycle tests. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 ## First manual publication
 

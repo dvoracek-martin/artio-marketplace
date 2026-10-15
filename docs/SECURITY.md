@@ -7,6 +7,8 @@
 - Plugin manifests are parsed against the pinned Core v1 Java contract and checked against one operator-configured registry host. Every main/sidecar OCI reference must be digest-pinned and available from Zot.
 - Catalog text rejects markup and unsafe schemes; external links require HTTPS. Uploaded media is format-sniffed, decoded, bounded by size/pixels, content-addressed, and hash-checked on read.
 - PostgreSQL stores public listing data, release state, media metadata, and an append-style audit log. Published release content is immutable at database layer.
+- Marketplace API requests have bounded in-process fixed-window limits (120 public and 30 publisher requests per client per minute by default), bounded client-bucket memory, and a standard `429` response with `Retry-After`. Forwarded client addresses are honored only when the immediate peer matches `MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES`; never trust arbitrary client-supplied forwarding headers.
+- Tomcat bounds request headers, form bodies, connection wait, keep-alive time and request read size. The external HTTPS proxy must additionally enforce request/body deadlines and the configured media request-size boundary.
 
 ## Deployment requirements
 
@@ -16,4 +18,4 @@ The v1 bearer token is a single shared publisher credential, not an identity sys
 
 ## Known scope limits
 
-There is no backoffice UI, payment, licensing, or multi-publisher authorization in v1. Core does not validate installed dependency state at marketplace publication time; Marketplace checks the copied manifest contract and image existence but cannot assert that a future Core instance satisfies installation-time policy. The pinned Core management route is unversioned; see [compatibility notes](CORE_COMPATIBILITY.md).
+There is no backoffice UI, payment, licensing, or multi-publisher authorization in v1. Core does not validate installed dependency state at marketplace publication time; Marketplace checks the copied manifest contract and image existence but cannot assert that a future Core instance satisfies installation-time policy. Core's pinned source maps versioned `/api/v1/admin/extensions/**` requests through its API versioning filter; see [compatibility notes](CORE_COMPATIBILITY.md).

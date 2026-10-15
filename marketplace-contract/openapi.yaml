@@ -3,7 +3,7 @@ info:
   title: Artio Marketplace API
   version: 1.0.0
   description: Public plugin catalog and trusted publisher API. Runtime manifests use the Artio Core PluginManifest v1 contract.
-  license: {name: Proprietary}
+  license: {name: Proprietary, identifier: LicenseRef-Artio-Marketplace-Proprietary}
 servers:
   - url: https://marketplace.example.invalid
 security: []

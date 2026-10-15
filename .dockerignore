@@ -4,6 +4,7 @@
 .idea
 .env
 secrets
+artio-core
 data
 **/build
 **/out

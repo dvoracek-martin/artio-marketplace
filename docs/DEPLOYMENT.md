@@ -17,12 +17,13 @@ Start with `docker compose --env-file .env -f deployment/compose.yaml up --build
 ## Production checklist
 
 - Use HTTPS, HSTS, strict host routing, and request size/time limits at the proxy. Prevent direct Internet access to container ports.
+- Configure `MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES` only with exact proxy peer addresses when using trusted `X-Forwarded-For`; otherwise the API rate limiter keys requests by the socket peer. Tune `MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE` and `MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE` for expected traffic and instance count.
 - Store publisher and Zot credentials in a secret manager and rotate them. Limit the shared publisher credential to trusted operators.
 - Set resource limits based on measured image sizes, database growth, and upload traffic; Compose values are local defaults, not capacity guidance.
 - Configure PostgreSQL PITR or scheduled encrypted backups, registry/media backups, restore drills, off-host copies, and retention.
 - Monitor readiness, disk use for each persistent volume, PostgreSQL connections, registry/API errors, and backup age. Alert on Zot exit and full disks.
 - Review registry retention and garbage collection before enabling deletion; published image manifests must remain pullable.
-- Review [Core compatibility](CORE_COMPATIBILITY.md); the Core management route migration is an upstream integration dependency.
+- Review [Core compatibility](CORE_COMPATIBILITY.md); configure the public registry hostname in the customer's `ARTIO_EXTENSION_TRUSTED_REGISTRIES` and retain Core's install-time validation.
 
 ## Scaling
 
