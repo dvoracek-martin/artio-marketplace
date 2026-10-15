@@ -1,0 +1,231 @@
+openapi: 3.1.0
+info:
+  title: Artio Marketplace API
+  version: 1.0.0
+  description: Public plugin catalog and trusted publisher API. Runtime manifests use the Artio Core PluginManifest v1 contract.
+  license: {name: Proprietary}
+servers:
+  - url: https://marketplace.example.invalid
+security: []
+paths:
+  /api/v1/marketplace/plugins:
+    get:
+      operationId: searchPlugins
+      summary: Search public plugins
+      parameters:
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: category, in: query, schema: {type: string}}
+        - {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}
+        - {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}
+        - {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}
+        - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Public paginated plugin cards, content: {application/json: {schema: {$ref: '#/components/schemas/Page'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}:
+    get:
+      operationId: getPlugin
+      summary: Get a listed plugin
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
+      responses:
+        '200': {description: Plugin listing detail, content: {application/json: {schema: {$ref: '#/components/schemas/Plugin'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}/releases:
+    get:
+      operationId: getPluginReleases
+      summary: List published releases for a plugin
+      parameters:
+        - {$ref: '#/components/parameters/PluginId'}
+        - {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}
+        - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Paginated published release list, content: {application/json: {schema: {$ref: '#/components/schemas/Page'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}/releases/{version}:
+    get:
+      operationId: getRelease
+      summary: Get public release metadata and manifest
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
+      responses:
+        '200':
+          description: Release metadata with Core install-time checks explicitly pending.
+          content: {application/json: {schema: {type: object}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}/releases/{version}/manifest:
+    get:
+      operationId: getCoreManifest
+      summary: Get the original Artio Core manifest
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}]
+      responses:
+        '200': {description: Original Core PluginManifest v1 JSON, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}/latest-compatible:
+    get:
+      operationId: getLatestCompatible
+      summary: Select the latest published release compatible by Core version and country
+      parameters:
+        - {$ref: '#/components/parameters/PluginId'}
+        - {name: coreVersion, in: query, required: true, schema: {$ref: '#/components/schemas/SemVer'}}
+        - {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}
+        - {name: includePrerelease, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200': {description: Highest compatible release selected by SemVer precedence, content: {application/json: {schema: {type: object}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/categories:
+    get:
+      operationId: getCategories
+      summary: List active catalog categories
+      parameters: [{name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
+      responses:
+        '200': {description: Active localized category codes, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/assets/{assetId}:
+    get:
+      operationId: getAsset
+      summary: Get an immutable validated catalog image
+      parameters: [{name: assetId, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Validated immutable raster image}
+        '304': {description: Asset has not changed}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/validate:
+    post:
+      operationId: validateRelease
+      summary: Validate a Core manifest, metadata and published OCI images
+      security: [{publisherToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Submission'}}}}
+      responses:
+        '200': {description: "Structural, metadata, and OCI validation result", content: {application/json: {schema: {type: object}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases:
+    post:
+      operationId: createRelease
+      summary: Create an immutable validated release draft
+      security: [{publisherToken: []}]
+      parameters: [{name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 160}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Submission'}}}}
+      responses:
+        '201': {description: Created validated release}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}:
+    get:
+      operationId: getDraft
+      summary: Get a publisher release record
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Publisher-only release record}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/catalog:
+    put:
+      operationId: replaceDraftCatalog
+      summary: Attach complete validated localized listing metadata
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: Updated catalog metadata}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/assets:
+    post:
+      operationId: uploadDraftAsset
+      summary: Upload a validated icon or screenshot
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}, {name: kind, in: query, required: true, schema: {type: string, enum: [icon, screenshot]}}]
+      requestBody: {required: true, content: {multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: string, format: binary}}}}}}
+      responses:
+        '200': {description: Immutable asset ID}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/publish:
+    post:
+      operationId: publishRelease
+      summary: Revalidate and publish a release atomically
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Published release}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/unlist:
+    post:
+      operationId: unlistRelease
+      summary: Remove a plugin from public catalog results
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Unlisted release}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/revoke:
+    post:
+      operationId: revokeRelease
+      summary: Revoke a catalog recommendation while retaining immutable content
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Revoked release; public OCI blobs remain accessible}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/publication-audit:
+    get:
+      operationId: getPublicationAudit
+      summary: List append-only publication audit entries
+      security: [{publisherToken: []}]
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Paginated publication audit entries}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    publisherToken: {type: http, scheme: bearer}
+  parameters:
+    PluginId: {name: pluginId, in: path, required: true, schema: {type: string}}
+    Version: {name: version, in: path, required: true, schema: {$ref: '#/components/schemas/SemVer'}}
+    ReleaseId: {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+  responses:
+    Error: {description: Safe error envelope, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  schemas:
+    SemVer: {type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'}
+    Error:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        requestId: {type: string, format: uuid}
+        details: {type: object}
+    Page:
+      type: object
+      required: [content, page, size, totalElements]
+      properties:
+        content: {type: array, items: {$ref: '#/components/schemas/Plugin'}}
+        page: {type: integer}
+        size: {type: integer}
+        totalElements: {type: integer}
+    Plugin: {type: object, description: Plugin card and listing detail}
+    Submission:
+      type: object
+      additionalProperties: false
+      required: [manifest, catalog]
+      properties:
+        manifest: {type: object, description: Exact Core PluginManifest v1 document}
+        catalog: {type: object, description: CatalogMetadataV1, additionalProperties: false}

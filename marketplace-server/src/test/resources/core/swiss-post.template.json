@@ -1,0 +1,30 @@
+{
+  "manifestVersion": "1",
+  "id": "shipping.swiss-post",
+  "name": "Swiss Post Shipping",
+  "vendor": "Swiss Post",
+  "version": "1.0.0",
+  "description": "Swiss Post Digital Commerce Barcode labels and merchant-configured domestic shipping rates.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/swiss-post@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["shipping.quote", "shipping.label"],
+  "configuration": {
+    "clientId": {"type":"text","required":true,"secret":false,"label":"Swiss Post client ID","description":"Client ID issued by Swiss Post Digital Commerce API registration.","format":null,"options":[],"minimumLength":1,"maximumLength":256,"minimum":null,"maximum":null},
+    "clientSecret": {"type":"secret","required":true,"secret":true,"label":"Swiss Post client secret","description":"Client secret issued by Swiss Post. Stored encrypted by Artio.","format":null,"options":[],"minimumLength":16,"maximumLength":512,"minimum":null,"maximum":null},
+    "frankingLicense": {"type":"text","required":true,"secret":false,"label":"Franking licence","description":"Swiss Post business franking licence supplied during API registration.","format":null,"options":[],"minimumLength":4,"maximumLength":8,"minimum":null,"maximum":null},
+    "senderName": {"type":"text","required":true,"secret":false,"label":"Sender name","description":"Merchant name printed as the shipment sender.","format":null,"options":[],"minimumLength":1,"maximumLength":35,"minimum":null,"maximum":null},
+    "senderStreet": {"type":"text","required":true,"secret":false,"label":"Sender street","description":"Merchant street and house number.","format":null,"options":[],"minimumLength":1,"maximumLength":35,"minimum":null,"maximum":null},
+    "senderPostalCode": {"type":"text","required":true,"secret":false,"label":"Sender postal code","description":"Merchant Swiss postal code.","format":null,"options":[],"minimumLength":4,"maximumLength":10,"minimum":null,"maximum":null},
+    "senderCity": {"type":"text","required":true,"secret":false,"label":"Sender city","description":"Merchant city.","format":null,"options":[],"minimumLength":1,"maximumLength":35,"minimum":null,"maximum":null},
+    "shippingPricesChf": {"type":"json","required":true,"secret":false,"label":"Domestic prices (CHF)","description":"Merchant-set rates keyed by ECO and PRI. Swiss Post service prices depend on the merchant contract.","format":null,"options":[],"minimumLength":null,"maximumLength":null,"minimum":null,"maximum":null},
+    "labelLayout": {"type":"enum","required":false,"secret":false,"label":"Label format","description":"Barcode API address label layout.","format":null,"options":["A6","A7"],"minimumLength":null,"maximumLength":null,"minimum":null,"maximum":null},
+    "printPreview": {"type":"boolean","required":false,"secret":false,"label":"Specimen labels","description":"Ask Swiss Post to mark generated labels as a specimen for safe setup verification.","format":null,"options":[],"minimumLength":null,"maximumLength":null,"minimum":null,"maximum":null}
+  },
+  "extensionPoints": ["shipping.provider.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope":"COUNTRY_SPECIFIC","countries":["CH"]},
+  "persistentPaths": ["/data/state"]
+}

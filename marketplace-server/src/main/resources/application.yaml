@@ -1,0 +1,65 @@
+server:
+  address: 0.0.0.0
+  port: 8080
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-swallow-size: 1MB
+    max-http-form-post-size: 6MB
+spring:
+  application:
+    name: artio-marketplace
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/artio_marketplace}
+    username: ${SPRING_DATASOURCE_USERNAME:artio_marketplace}
+    password: ${SPRING_DATASOURCE_PASSWORD:change-me-local-only}
+    hikari:
+      maximum-pool-size: 12
+      connection-timeout: 3000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+      file-size-threshold: 0
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: true
+  jackson2:
+    deserialization:
+      fail-on-unknown-properties: true
+  http:
+    converters:
+      preferred-json-mapper: jackson2
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    readinessstate:
+      enabled: true
+    probes:
+      enabled: true
+    group:
+      readiness:
+        include: readinessState,db,zot
+marketplace:
+  registry:
+    public-host: ${MARKETPLACE_REGISTRY_HOST:localhost:5000}
+    internal-url: ${MARKETPLACE_ZOT_URL:http://localhost:5000}
+    binary: ${MARKETPLACE_ZOT_BINARY:}
+    config: ${MARKETPLACE_ZOT_CONFIG:/etc/zot/config.json}
+  publisher:
+    token-sha256: ${MARKETPLACE_PUBLISHER_TOKEN_SHA256:}
+  media:
+    root: ${MARKETPLACE_MEDIA_ROOT:./data/assets}

@@ -1,0 +1,10 @@
+.git
+.gradle
+.gradle-cache
+.idea
+.env
+secrets
+data
+**/build
+**/out
+*.log

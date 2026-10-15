@@ -1,0 +1,68 @@
+{
+  "manifestVersion": "1",
+  "id": "observability.artio",
+  "name": "Artio Observability",
+  "vendor": "Artio",
+  "version": "1.0.0",
+  "description": "Optional OTLP collector, Prometheus metrics, Grafana dashboards and Jaeger traces, managed as one service bundle.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/observability-control@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": [],
+  "configuration": {
+    "grafanaAdminUser": {
+      "type": "text", "required": true, "secret": false,
+      "label": "Grafana administrator", "description": "Local Grafana account name.",
+      "format": null, "options": [], "minimumLength": 1, "maximumLength": 64,
+      "minimum": null, "maximum": null
+    },
+    "grafanaAdminPassword": {
+      "type": "secret", "required": true, "secret": true,
+      "label": "Grafana administrator password", "description": "Password for the plugin's isolated Grafana instance.",
+      "format": null, "options": [], "minimumLength": 16, "maximumLength": 256,
+      "minimum": null, "maximum": null
+    }
+  },
+  "extensionPoints": [],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": { "scope": "GLOBAL", "countries": [] },
+  "services": [
+    {
+      "id": "collector",
+      "image": "ghcr.io/artio-plugins/observability-collector@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "port": 13133,
+      "healthPath": "/",
+      "dependsOn": ["jaeger"],
+      "internalPorts": [4317, 4318, 9464]
+    },
+    {
+      "id": "prometheus",
+      "image": "ghcr.io/artio-plugins/observability-prometheus@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "port": 9090,
+      "healthPath": "/-/healthy",
+      "dependsOn": ["collector"],
+      "persistentPaths": ["/prometheus"]
+    },
+    {
+      "id": "jaeger",
+      "image": "ghcr.io/artio-plugins/observability-jaeger@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "port": 16686,
+      "healthPath": "/",
+      "dependsOn": ["main"]
+    },
+    {
+      "id": "grafana",
+      "image": "ghcr.io/artio-plugins/observability-grafana@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "port": 3000,
+      "healthPath": "/api/health",
+      "configurationBindings": {
+        "GF_SECURITY_ADMIN_USER": "grafanaAdminUser",
+        "GF_SECURITY_ADMIN_PASSWORD": "grafanaAdminPassword"
+      },
+      "dependsOn": ["prometheus", "jaeger"],
+      "persistentPaths": ["/var/lib/grafana"]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/zot",
+    "gc": true,
+    "gcDelay": "2h",
+    "gcInterval": "24h"
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "realm": "Artio Marketplace Registry",
+    "compat": ["docker2s2"],
+    "auth": {
+      "htpasswd": {
+        "path": "/run/secrets/zot_htpasswd"
+      }
+    },
+    "accessControl": {
+      "repositories": {
+        "public/**": {
+          "anonymousPolicy": ["read"],
+          "policies": [
+            { "users": ["publisher"], "actions": ["read", "create", "update", "delete"] }
+          ]
+        },
+        "**": {
+          "policies": [
+            { "users": ["publisher"], "actions": ["read", "create", "update", "delete"] }
+          ]
+        }
+      }
+    }
+  },
+  "log": { "level": "info", "output": "/dev/stdout" },
+  "extensions": { "search": { "enable": false }, "sync": { "enable": false }, "ui": { "enable": false } }
+}

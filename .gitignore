@@ -1,0 +1,13 @@
+.env
+.env.*.local
+secrets/
+**/build/
+.gradle/
+.gradle-cache/
+.idea/
+*.iml
+data/
+coverage/
+*.log
+*.tmp
+*.bak

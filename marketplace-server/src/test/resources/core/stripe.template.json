@@ -1,0 +1,74 @@
+{
+  "manifestVersion": "1",
+  "id": "payments.stripe",
+  "name": "Stripe Payments",
+  "vendor": "Stripe",
+  "version": "1.0.0",
+  "description": "Hosted Stripe Checkout, signed webhook verification, refunds, expiration and reconciliation through the Artio payment provider contract.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/stripe-payments@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["payment.process"],
+  "configuration": {
+    "stripeSecretKey": {
+      "type": "secret",
+      "required": true,
+      "secret": true,
+      "label": "Stripe secret key",
+      "description": "Use a restricted Stripe API key with checkout session, payment intent, and refund permissions.",
+      "format": null,
+      "options": [],
+      "minimumLength": 16,
+      "maximumLength": 512,
+      "minimum": null,
+      "maximum": null
+    },
+    "webhookSecret": {
+      "type": "secret",
+      "required": true,
+      "secret": true,
+      "label": "Webhook signing secret",
+      "description": "Signing secret for the configured checkout.session webhook endpoint.",
+      "format": null,
+      "options": [],
+      "minimumLength": 16,
+      "maximumLength": 512,
+      "minimum": null,
+      "maximum": null
+    },
+    "testMode": {
+      "type": "boolean",
+      "required": false,
+      "secret": false,
+      "label": "Use Stripe test mode",
+      "description": "Defaults to test mode. Live secret keys are rejected until this is explicitly disabled.",
+      "format": null,
+      "options": [],
+      "minimumLength": null,
+      "maximumLength": null,
+      "minimum": null,
+      "maximum": null
+    },
+    "allowedPaymentMethods": {
+      "type": "json",
+      "required": false,
+      "secret": false,
+      "label": "Allowed payment method filter",
+      "description": "Optional Stripe dynamic-method allowlist, for example [\"twint\"]. Leave empty to use Stripe account settings.",
+      "format": null,
+      "options": [],
+      "minimumLength": null,
+      "maximumLength": null,
+      "minimum": null,
+      "maximum": null
+    }
+  },
+  "extensionPoints": ["payment.provider.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {
+    "scope": "GLOBAL",
+    "countries": []
+  }
+}

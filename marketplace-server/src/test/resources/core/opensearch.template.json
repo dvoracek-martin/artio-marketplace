@@ -1,0 +1,31 @@
+{
+  "manifestVersion": "1",
+  "id": "catalog.opensearch",
+  "name": "Artio OpenSearch Catalog",
+  "vendor": "Artio",
+  "version": "1.0.0",
+  "description": "Private OpenSearch-backed product search with transactional alias rebuilds.",
+  "minimumCoreVersion": "0.1.0",
+  "maximumCoreVersion": "0.9.0",
+  "image": "ghcr.io/artio-plugins/opensearch-search@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+  "dependencies": [],
+  "permissions": ["catalog.read"],
+  "configuration": {},
+  "extensionPoints": ["catalog.search.v1"],
+  "healthPath": "/health",
+  "diagnosticsPath": "/diagnostics",
+  "geographicAvailability": {"scope": "GLOBAL", "countries": []},
+  "services": [
+    {
+      "id": "opensearch",
+      "image": "ghcr.io/artio-plugins/opensearch-search-node@sha256:REPLACE_WITH_PUBLISHED_IMAGE_DIGEST",
+      "port": 9200,
+      "healthPath": "/_cluster/health",
+      "configurationBindings": {},
+      "dependsOn": [],
+      "persistentPaths": ["/usr/share/opensearch/data"],
+      "internalPorts": [],
+      "memoryLimitMb": 768
+    }
+  ]
+}

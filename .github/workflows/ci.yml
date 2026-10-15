@@ -1,0 +1,88 @@
+name: Marketplace CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - name: Compile, format, unit and architecture checks, coverage
+        run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
+      - name: Lint OpenAPI 3.1 contract
+        run: npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml
+      - name: Prepare isolated Docker acceptance credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 secrets
+          publisher_token=$(openssl rand -hex 32)
+          zot_password=$(openssl rand -hex 32)
+          postgres_password=$(openssl rand -hex 32)
+          printf '%s\n' "$publisher_token" > secrets/publisher-token.txt
+          printf '%s\n' "$zot_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i publisher > secrets/zot.htpasswd
+          token_hash=$(printf '%s' "$publisher_token" | sha256sum | cut -d' ' -f1)
+          cat > .env <<EOF
+          POSTGRES_PASSWORD=$postgres_password
+          MARKETPLACE_PUBLISHER_TOKEN_SHA256=$token_hash
+          MARKETPLACE_REGISTRY_HOST=localhost:5000
+          MARKETPLACE_API_PORT=8080
+          MARKETPLACE_REGISTRY_PORT=5000
+          ZOT_HTPASSWD_FILE=$(pwd)/secrets/zot.htpasswd
+          EOF
+          echo "MARKETPLACE_ZOT_TEST_PASSWORD=$zot_password" >> "$GITHUB_ENV"
+          echo "MARKETPLACE_PUBLISHER_TOKEN_FILE=$(pwd)/secrets/publisher-token.txt" >> "$GITHUB_ENV"
+      - name: Enable local HTTP registry for the Docker acceptance fixture
+        run: |
+          echo '{"insecure-registries":["localhost:5000"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info
+      - name: Start Marketplace, Zot and PostgreSQL
+        run: docker compose --env-file .env -f deployment/compose.yaml up --build -d
+      - name: Exercise live Zot ACL, OCI publication and public API
+        run: ./scripts/docker-acceptance.sh
+      - name: Capture diagnostics on failure
+        if: failure()
+        run: docker compose --env-file .env -f deployment/compose.yaml logs --no-color
+      - name: Generate SPDX SBOM for verified image
+        if: success()
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.28.0 artio-marketplace:local -o spdx-json=marketplace.spdx.json
+      - name: Upload verified build and SBOM artifacts
+        if: success() && github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: artio-marketplace-${{ github.sha }}
+          path: |
+            marketplace-server/build/libs/marketplace-server-0.1.0-SNAPSHOT.jar
+            marketplace.spdx.json
+            marketplace-server/build/reports/jacoco/test/jacocoTestReport.xml
+          if-no-files-found: error
+          retention-days: 30
+      - name: Scan Marketplace image for fixed HIGH and CRITICAL vulnerabilities
+        if: success()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: artio-marketplace:local
+          version: v0.76.0
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+      - name: Stop ephemeral acceptance stack
+        if: always()
+        run: docker compose --env-file .env -f deployment/compose.yaml down -v
+
