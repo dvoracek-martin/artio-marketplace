@@ -4,7 +4,7 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `46621fa74ac9e88271db83570b1379d80ec945bc`
+- Commit: `fde6a4ffd2269ec7c999442ee219d5eb7cfa3c5f`
 - This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, and signed Marketplace advisory verification with local exact-digest enforcement. Marketplace CI checks out this commit in an isolated workspace and does not modify Core.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
