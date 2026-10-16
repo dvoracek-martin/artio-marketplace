@@ -28,6 +28,7 @@ SQL
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V2__release_moderation_and_semver.sql
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V3__two_party_release_publication.sql
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V4__durable_oci_promotion_jobs.sql
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V5__immutable_signed_release_descriptors.sql
 result=$(docker exec "$container" psql -At -U postgres -d postgres -c \
   "SELECT p.moderation_state || ':' || r.publication_state || ':' || r.revocation_category || ':' || r.revoked_by FROM marketplace_plugins p JOIN marketplace_releases r USING(plugin_id) WHERE p.plugin_id='legacy.plugin'")
 [[ $result == 'REVIEW_REQUIRED:REVOKED:LEGACY_UNKNOWN:legacy-migration' ]] || {
@@ -72,4 +73,18 @@ BEGIN
   END IF;
 END $$;
 SQL
-echo 'V1-V4 migration test passed: legacy state is quarantined, SemVer ordering and two-party approval are preserved, catalog edits reset approval, and durable OCI promotion jobs are available.'
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+INSERT INTO release_signatures(release_id,key_id,descriptor_sha256,descriptor_document,signature_base64url)
+VALUES ('00000000-0000-0000-0000-000000000002','migration-test',repeat('f',64),'{}','AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+DO $$
+BEGIN
+  BEGIN
+    UPDATE release_signatures SET signature_base64url='tampered'
+    WHERE release_id='00000000-0000-0000-0000-000000000002';
+    RAISE EXCEPTION 'signed release signature mutation was allowed';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM = 'signed release signature mutation was allowed' THEN RAISE; END IF;
+  END;
+END $$;
+SQL
+echo 'V1-V5 migration test passed: legacy state is quarantined, SemVer ordering and two-party approval are preserved, catalog edits reset approval, durable OCI jobs exist, and signed descriptors are immutable.'

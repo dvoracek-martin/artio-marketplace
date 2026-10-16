@@ -9,7 +9,7 @@ publisher_registry_connect=${MARKETPLACE_REGISTRY_PUBLISH_CONNECT_HOST:-$publish
 example="$PWD/examples/reference-plugin"
 compose=(docker compose --project-name "${MARKETPLACE_COMPOSE_PROJECT:-deployment}" --env-file "${MARKETPLACE_ENV_FILE:-.env}" -f deployment/compose.yaml)
 package=$(mktemp -d "$PWD/.acceptance-tmp.XXXXXX")
-python=${MARKETPLACE_PYTHON:-python3}
+python=${MARKETPLACE_PYTHON:-python}
 export PYTHON="$python"
 tags=()
 artifact_refs=()
@@ -35,8 +35,36 @@ trap cleanup EXIT
 : "${MARKETPLACE_PUBLISHER_TOKEN_FILE:?Set the test publisher-token file path}"
 : "${MARKETPLACE_ADMIN_TOKEN_FILE:?Set the test admin-token file path}"
 : "${MARKETPLACE_REVOCATION_TOKEN_FILE:?Set the test revocation-token file path}"
+: "${MARKETPLACE_SIGNING_INGEST_TOKEN_FILE:?Set the test signing-ingest-token file path}"
+: "${MARKETPLACE_SIGNING_PRIVATE_KEY_FILE:?Set the test release-signing private-key file path}"
+: "${MARKETPLACE_SIGNING_KEY_ID:?Set the trusted release-signing key id}"
 publisher_token=$(cat "$MARKETPLACE_PUBLISHER_TOKEN_FILE")
 admin_token=$(cat "$MARKETPLACE_ADMIN_TOKEN_FILE")
+signing_token=$(cat "$MARKETPLACE_SIGNING_INGEST_TOKEN_FILE")
+
+sign_release() {
+  local release_id=$1 version=$2 temp="$package/signature-$1"
+  mkdir -p "$temp"
+  curl --fail --silent --show-error -H "Authorization: Bearer $publisher_token" \
+    "$base/api/v1/admin/marketplace/releases/$release_id/signing-payload" -o "$temp/descriptor.json"
+  openssl pkeyutl -sign -rawin -inkey "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" \
+    -in "$temp/descriptor.json" -out "$temp/signature.bin"
+  local signature
+  signature=$(base64 -w0 "$temp/signature.bin" | tr '+/' '-_' | tr -d '=')
+  "$python" - "$temp/descriptor.json" "$temp/envelope.json" "$MARKETPLACE_SIGNING_KEY_ID" "$signature" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding='utf-8') as descriptor:
+    payload=json.load(descriptor)
+with open(sys.argv[2], 'w', encoding='utf-8') as envelope:
+    json.dump({'descriptor':payload,'signature':{'algorithm':'Ed25519','keyId':sys.argv[3],'value':sys.argv[4]}}, envelope, separators=(',',':'))
+PY
+  curl --fail --silent --show-error -H "Authorization: Bearer $signing_token" \
+    -H 'Content-Type: application/json' --data-binary "@$temp/envelope.json" \
+    "$base/api/v1/admin/marketplace/releases/$release_id/signature" >/dev/null
+  curl --fail --silent --show-error \
+    "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/descriptor" \
+    | "$python" -c 'import json,sys; x=json.load(sys.stdin); assert x["signature"]["algorithm"] == "Ed25519" and x["descriptor"]["version"] == sys.argv[1]' "$version"
+}
 "$python" - <<'PY'
 import json
 with open('deployment/zot/config.json', encoding='utf-8') as source:
@@ -55,7 +83,7 @@ PY
 management_base=${MARKETPLACE_MANAGEMENT_URL:-http://127.0.0.1:${MARKETPLACE_MANAGEMENT_PORT:-8081}}
 wait_ready() {
   for _ in $(seq 1 60); do
-    if curl --fail --silent "$management_base/actuator/health/readiness" >/dev/null; then return 0; fi
+    if curl --fail --silent --max-time 3 "$management_base/actuator/health/readiness" >/dev/null; then return 0; fi
     sleep 2
   done
   echo 'Marketplace did not become ready; inspect Compose logs.' >&2
@@ -279,6 +307,10 @@ assert status == 404, f'Approved but unpromoted descriptor was available with HT
 PY
   MARKETPLACE_PUBLISHER_TOKEN_FILE="$MARKETPLACE_PUBLISHER_TOKEN_FILE" \
     ./scripts/publish-staged-release.sh "$staged_release_id" "$base" >/dev/null
+  unsigned_descriptor_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/descriptor")
+  [[ $unsigned_descriptor_status == 404 ]] || { echo "Unsigned official descriptor was exposed (HTTP $unsigned_descriptor_status)." >&2; exit 1; }
+  sign_release "$staged_release_id" "$version"
   postgres_container=$("${compose[@]}" ps -q postgres)
   promotion_state=$(docker exec "$postgres_container" psql -At -U artio_marketplace -d artio_marketplace -c \
     "SELECT state || ':' || attempt_count FROM publication_promotions WHERE release_id='$staged_release_id'")
@@ -534,6 +566,8 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   export ARTIO_MARKETPLACE_BASE_URL=${ARTIO_MARKETPLACE_BASE_URL:-$base}
   export ARTIO_MARKETPLACE_TEST_PLUGIN_ID=marketplace.reference
   export ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION=1.3.0
+  signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')
+  export ARTIO_MARKETPLACE_TRUSTED_KEYS="$MARKETPLACE_SIGNING_KEY_ID=$signing_public_key"
   export ARTIO_EXTENSION_TRUSTED_REGISTRIES=${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-$registry}
   if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \

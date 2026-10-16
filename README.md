@@ -8,6 +8,7 @@ Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and disc
 - Two-person manual release workflow for digest-pinned OCI images, localized metadata, screenshots, icon, and release notes.
 - Publisher images enter private `staging/**`; after independent approval, Marketplace automatically promotes the complete main/sidecar OCI bundle to `public/**` and only then exposes the release in the catalog.
 - PostgreSQL migrations and immutable release records; OCI registry and uploaded media are persisted separately.
+- Official releases expose a signed immutable descriptor only after complete Zot promotion and an independent Ed25519 signing workflow; custom manifest registration remains a separate Core path.
 - Combined Marketplace + Zot container and PostgreSQL Compose deployment.
 - Backoffice UI, payments, and licensing are intentionally out of scope.
 
@@ -52,6 +53,8 @@ For internet-facing deployment, do not expose these local Compose ports directly
 ## Publish a plugin
 
 Marketplace itself has no graphical backoffice: plugin staging, approval, publication, and moderation use the versioned REST API and the included scripts. The public catalog is also API-only; see [OpenAPI](marketplace-contract/openapi.yaml). Zot provides a separate optional UI ([upstream project](https://github.com/project-zot/zui)) for browsing and managing OCI registry content. It is enabled for local development by [`deployment/zot/config.dev.json`](deployment/zot/config.dev.json) and disabled in the base/production configuration ([`deployment/zot/config.json`](deployment/zot/config.json)). The Zot UI does not publish or moderate Marketplace releases. Payments and licensing are not implemented.
+
+After the independent admin approves and Marketplace finishes OCI promotion, run the protected **Sign published Marketplace release** GitHub workflow with its release UUID. The workflow signs Marketplace's exact canonical descriptor, then submits it using the isolated signature-ingest credential. Configure the protected `marketplace-signing` environment with the publisher token, signature-ingest token, signing key ID variable, Marketplace URL variable and Ed25519 private-key secret. Configure the matching public key in Marketplace as `MARKETPLACE_SIGNING_TRUSTED_KEYS` and in Core as `ARTIO_MARKETPLACE_TRUSTED_KEYS` (`key-id=base64url-X509-public-key`, comma-separated during rotation). The public `/api/v1/marketplace/plugins/{pluginId}/releases/{version}/descriptor` endpoint stays unavailable until this signature has been verified and stored. Keep the signing private key out of Marketplace runtime, Core, and ordinary publisher credentials.
 
 1. Prepare a plugin package containing `manifest.json`, `catalog.json`, and the referenced icon/screenshots. Its runtime images (including sidecars) must be built and pushed to Zot first. The manifest must reference the public registry address with an immutable `@sha256:...` digest.
 2. Push the image to the publisher registry. For a one-click local stack, configure the two `localhost` registry ports listed in `.local-marketplace/connection.txt` as insecure registries in Docker Desktop (**Settings → Docker Engine**; add them to any existing configuration and apply/restart). Then read the selected ports and push the image:

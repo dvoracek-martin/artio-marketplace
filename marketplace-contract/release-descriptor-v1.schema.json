@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://artio.example/schemas/release-descriptor-v1.schema.json",
+  "title": "Artio Official Release Descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "pluginId", "version", "manifestDigest", "manifest", "images"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "pluginId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"},
+    "manifestDigest": {"$ref": "#/$defs/sha256"},
+    "manifest": {"type": "object"},
+    "images": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 33,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/image"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "repository", "digest"],
+      "properties": {
+        "role": {"type": "string", "pattern": "^(MAIN|SIDECAR:[a-z0-9][a-z0-9._-]{0,63})$"},
+        "repository": {"type": "string", "pattern": "^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?/public/plugins/[a-zA-Z0-9._/-]+$"},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+name: Sign published Marketplace release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: UUID of a fully published Marketplace release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment: marketplace-signing
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Sign the exact immutable descriptor and submit its signature
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+          MARKETPLACE_URL: ${{ vars.MARKETPLACE_URL }}
+          PUBLISHER_TOKEN: ${{ secrets.MARKETPLACE_PUBLISHER_TOKEN }}
+          SIGNING_INGEST_TOKEN: ${{ secrets.MARKETPLACE_SIGNING_INGEST_TOKEN }}
+          SIGNING_KEY_ID: ${{ vars.MARKETPLACE_SIGNING_KEY_ID }}
+          SIGNING_PRIVATE_KEY_PEM: ${{ secrets.ARTIO_RELEASE_SIGNING_PRIVATE_KEY_PEM }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+          [[ "$MARKETPLACE_URL" =~ ^https://[^/]+/?$ ]]
+          [[ "$SIGNING_KEY_ID" =~ ^[A-Za-z0-9._-]{1,120}$ ]]
+          test -n "$PUBLISHER_TOKEN"
+          test -n "$SIGNING_INGEST_TOKEN"
+          test -n "$SIGNING_PRIVATE_KEY_PEM"
+          temp_dir=$(mktemp -d)
+          trap 'rm -rf "$temp_dir"' EXIT
+          printf '%s\n' "$SIGNING_PRIVATE_KEY_PEM" > "$temp_dir/release-key.pem"
+          chmod 600 "$temp_dir/release-key.pem"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+            -H "Authorization: Bearer $PUBLISHER_TOKEN" \
+            "$MARKETPLACE_URL/api/v1/admin/marketplace/releases/$RELEASE_ID/signing-payload" \
+            -o "$temp_dir/descriptor.json"
+          openssl pkeyutl -sign -rawin -inkey "$temp_dir/release-key.pem" \
+            -in "$temp_dir/descriptor.json" -out "$temp_dir/signature.bin"
+          signature=$(base64 -w0 "$temp_dir/signature.bin" | tr '+/' '-_' | tr -d '=')
+          jq -cn --arg keyId "$SIGNING_KEY_ID" --arg value "$signature" \
+            --slurpfile descriptor "$temp_dir/descriptor.json" \
+            '{descriptor:$descriptor[0],signature:{algorithm:"Ed25519",keyId:$keyId,value:$value}}' \
+            > "$temp_dir/envelope.json"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+            -H "Authorization: Bearer $SIGNING_INGEST_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary "@$temp_dir/envelope.json" \
+            "$MARKETPLACE_URL/api/v1/admin/marketplace/releases/$RELEASE_ID/signature"

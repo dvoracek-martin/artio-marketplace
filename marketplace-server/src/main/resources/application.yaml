@@ -80,5 +80,8 @@ marketplace:
     token-sha256: ${MARKETPLACE_ADMIN_TOKEN_SHA256:}
   revocation:
     token-sha256: ${MARKETPLACE_REVOCATION_TOKEN_SHA256:}
+  signing:
+    ingest-token-sha256: ${MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256:}
+    trusted-keys: ${MARKETPLACE_SIGNING_TRUSTED_KEYS:}
   media:
     root: ${MARKETPLACE_MEDIA_ROOT:./data/assets}

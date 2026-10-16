@@ -68,6 +68,36 @@ paths:
       responses:
         '200': {description: Original Core PluginManifest v1 JSON or capability-envelope v2 JSON, content: {application/json: {schema: {oneOf: [{type: object, description: Exact Core PluginManifest v1 document}, {$ref: './plugin-manifest-v2.schema.json'}]}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/plugins/{pluginId}/releases/{version}/descriptor:
+    get:
+      operationId: getSignedReleaseDescriptor
+      summary: Get an immutable, independently signed official release descriptor
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}]
+      responses:
+        '200': {description: "Descriptor and Ed25519 signature, available only after complete publication and signature verification", content: {application/json: {schema: {$ref: './signed-release-envelope-v1.schema.json'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/signing-payload:
+    get:
+      operationId: getReleaseSigningPayload
+      summary: Get the JCS-canonical descriptor bytes for a fully published release
+      security: [{publisherToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Exact RFC 8785 canonical descriptor bytes, content: {application/json: {schema: {$ref: './release-descriptor-v1.schema.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/signature:
+    post:
+      operationId: submitReleaseSignature
+      summary: Verify and immutably store the independent signing workflow signature
+      security: [{signatureIngestToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './signed-release-envelope-v1.schema.json'}}}}
+      responses:
+        '200': {description: Signature stored or idempotently recognized}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /api/v1/marketplace/plugins/{pluginId}/latest-compatible:
     get:
       operationId: getLatestCompatible
@@ -261,6 +291,7 @@ components:
     publisherToken: {type: http, scheme: bearer}
     adminToken: {type: http, scheme: bearer}
     revocationToken: {type: http, scheme: bearer}
+    signatureIngestToken: {type: http, scheme: bearer}
   parameters:
     PluginId: {name: pluginId, in: path, required: true, schema: {type: string}}
     Version: {name: version, in: path, required: true, schema: {$ref: '#/components/schemas/SemVer'}}
