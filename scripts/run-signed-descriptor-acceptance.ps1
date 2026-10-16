@@ -14,6 +14,14 @@ $gitBash = 'C:\Program Files\Git\bin\bash.exe'
 $stackStarted = $false
 $marketplaceImageExisted = $false
 $htpasswdImageExisted = $false
+$testBaseImages = @(
+  'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de',
+  'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',
+  'eclipse-temurin:25-jdk-noble@sha256:589ff4cc3f71aab462e7048a47a0d10edf57fbccde3fceea2281e610bf5880b4',
+  'eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab',
+  'ghcr.io/project-zot/zot@sha256:6b69512c00dceaad05b1144e6079aac6aa7309d7fd200f9947ecb1de09cf48c8'
+)
+$testBaseImagesAbsentBefore = [System.Collections.Generic.List[string]]::new()
 
 function New-Token {
   $bytes = [byte[]]::new(32)
@@ -59,6 +67,10 @@ try {
   $marketplaceImageExisted = ($LASTEXITCODE -eq 0)
   docker image inspect httpd:2.4-alpine *> $null
   $htpasswdImageExisted = ($LASTEXITCODE -eq 0)
+  foreach ($image in $testBaseImages) {
+    docker image inspect $image *> $null
+    if ($LASTEXITCODE -ne 0) { $testBaseImagesAbsentBefore.Add($image) }
+  }
 
   $publisher = New-Token
   $admin = New-Token
@@ -70,11 +82,23 @@ try {
   $keyId = 'local-acceptance-2026'
   $keyPath = Join-Path $taskTemp 'release-signing-key.pem'
   $publicKeyPath = Join-Path $taskTemp 'release-signing-public.der'
+  $advisoryKeyId = 'local-acceptance-advisory-2026'
+  $advisoryKeyPath = Join-Path $taskTemp 'advisory-signing-key.pem'
+  $advisoryPrivateKeyPath = Join-Path $taskTemp 'advisory-signing-private.der'
+  $advisoryPublicKeyPath = Join-Path $taskTemp 'advisory-signing-public.der'
   & $openssl genpkey -algorithm Ed25519 -out $keyPath
   if ($LASTEXITCODE -ne 0) { throw 'Could not generate isolated signing key.' }
   & $openssl pkey -in $keyPath -pubout -outform DER -out $publicKeyPath
   if ($LASTEXITCODE -ne 0) { throw 'Could not derive isolated signing key.' }
   $publicKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes($publicKeyPath)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+  & $openssl genpkey -algorithm Ed25519 -out $advisoryKeyPath
+  if ($LASTEXITCODE -ne 0) { throw 'Could not generate isolated advisory signing key.' }
+  & $openssl pkey -in $advisoryKeyPath -outform DER -out $advisoryPrivateKeyPath
+  if ($LASTEXITCODE -ne 0) { throw 'Could not encode isolated advisory private key.' }
+  & $openssl pkey -in $advisoryKeyPath -pubout -outform DER -out $advisoryPublicKeyPath
+  if ($LASTEXITCODE -ne 0) { throw 'Could not derive isolated advisory signing key.' }
+  $advisoryPrivateKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes($advisoryPrivateKeyPath))
+  $advisoryPublicKey = [Convert]::ToBase64String([IO.File]::ReadAllBytes($advisoryPublicKeyPath)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 
   $publisherLine = (& docker run --rm --entrypoint htpasswd httpd:2.4-alpine -Bbn publisher $zotPassword)
   if ($LASTEXITCODE -ne 0) { throw 'Could not create isolated Zot publisher credential.' }
@@ -90,6 +114,8 @@ try {
     "MARKETPLACE_REVOCATION_TOKEN_SHA256=$(Get-Sha256 $revocation)",
     "MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256=$(Get-Sha256 $signing)",
     "MARKETPLACE_SIGNING_TRUSTED_KEYS=$keyId=$publicKey",
+    "MARKETPLACE_ADVISORY_SIGNING_KEY_ID=$advisoryKeyId",
+    "MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64=$advisoryPrivateKey",
     'MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter',
     "MARKETPLACE_ZOT_PROMOTION_PASSWORD=$promoterPassword",
     'MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE=200',
@@ -124,6 +150,7 @@ try {
   $env:MARKETPLACE_SIGNING_INGEST_TOKEN_FILE = "$bashTemp/signing-ingest-token.txt"
   $env:MARKETPLACE_SIGNING_PRIVATE_KEY_FILE = "$bashTemp/release-signing-key.pem"
   $env:MARKETPLACE_SIGNING_KEY_ID = $keyId
+  $env:ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS = "$advisoryKeyId=$advisoryPublicKey"
   $env:MARKETPLACE_REGISTRY_HOST = 'localhost:15100'
   $env:MARKETPLACE_REGISTRY_CONNECT_HOST = 'localhost:15100'
   $env:MARKETPLACE_REGISTRY_PUBLISH_HOST = 'localhost:15101'
@@ -164,6 +191,7 @@ try {
   }
   if (-not $marketplaceImageExisted) { docker image rm artio-marketplace:local 2>$null | Out-Null }
   if (-not $htpasswdImageExisted) { docker image rm httpd:2.4-alpine 2>$null | Out-Null }
+  foreach ($image in $testBaseImagesAbsentBefore) { docker image rm $image 2>$null | Out-Null }
   $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
   $target = [IO.Path]::GetFullPath($taskTemp)
   if ($target.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Leaf $target).StartsWith('artio-marketplace-signed-descriptor-', [StringComparison]::Ordinal)) {

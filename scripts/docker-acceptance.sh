@@ -402,6 +402,7 @@ curl --fail --silent --show-error --head --user "publisher:$zot_password" --head
   "http://$publisher_registry_connect/v2/staging/plugins/artio-reference/manifests/$main_digest_120" >/dev/null
 docker image rm "$old_main_ref" >/dev/null
 docker pull "$old_main_ref" >/dev/null
+tags+=("$old_main_ref")
 echo 'Zot retained the previous manifest and image after its mutable tag was overwritten.'
 echo 'OCI pushes and release publication loop completed.'
 

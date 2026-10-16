@@ -4,8 +4,8 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `4db2d5eabf4b64bb9d7721262d6478f0ec9038bf` (`feat(extensions): support trusted private registries`)
-- This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, signed Marketplace advisory verification with local exact-digest enforcement, and encrypted credentials for explicitly trusted private OCI registries. Marketplace CI checks out this commit in an isolated workspace and does not modify Core.
+- Commit: `80b8f799e1ab3329844e0fa564f0f373b1ad4c07` (`feat(extensions): install verified Marketplace releases`)
+- This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, signed Marketplace advisory verification with local exact-digest enforcement, encrypted credentials for explicitly trusted private OCI registries, and the server-side official-release-to-job path. Marketplace CI checks out this exact commit in an isolated workspace and does not modify Core.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
 ## Runtime manifest contracts observed at the pinned commit
@@ -22,7 +22,7 @@ Core Docker runtime starts the primary image and sidecars in declared dependency
 
 ## Versioned Core management routes
 
-Core's extension management and Marketplace proxy controllers are versioned under `/api/v1`. Core imports v1 manifests through `/api/v1/admin/extensions/register` and v2 envelopes through `/api/v1/admin/extensions/register-v2`; both remain one development REST surface. The internal extension-controller routes under `/internal/v1/extensions/**` are a separate private runtime protocol. Marketplace does not call legacy unversioned aliases.
+Core's extension management and Marketplace proxy controllers are versioned under `/api/v1`. For an official install, Backoffice sends only `pluginId`, `version`, and an idempotency key to `POST /api/v1/admin/extensions/marketplace/plugins/{pluginId}/releases/{version}/installations`. Core fetches and verifies the signed release descriptor itself, validates local policy, atomically records release provenance and a digest-bound `MARKETPLACE` job, then its durable worker pulls the pinned primary and sidecar images. The browser does not relay a manifest as evidence of official origin. Manifest registration remains available for custom/private workflows. The internal extension-controller routes under `/internal/v1/extensions/**` are a separate private runtime protocol. Marketplace does not call legacy unversioned aliases or access customer Docker.
 
 ## Live signed-advisory acceptance
 
@@ -34,7 +34,9 @@ Core commit `9edd334a8cdd55b17f11b4af84304fe0f190c571` adds a focused verifier t
 
 Marketplace CI run `38943007707` passed `PublicationRecoveryPostgresIntegrationTest` against the current single V1 schema snapshot. It injects a partial OCI copy failure and retries the same approved release, recovers an expired promotion reservation after process interruption, and races a plugin moderation suspension against publication finalization. Each failed attempt remains retryable and cannot mark the release `PUBLISHED` until the full promotion and final moderation check pass. The same workflow passed the live Zot/Marketplace acceptance, backup/restore smoke pull, vulnerability scan and ephemeral Compose cleanup. No incremental schema or V1-to-V2 upgrade migration is part of this gate.
 
-The pinned Core also encrypts per-host private registry credentials in its single development V1 schema. Credential management is limited to the configured `ARTIO_EXTENSION_TRUSTED_REGISTRIES` allowlist and recent MFA-protected Backoffice administration. The Marketplace CI pin is being advanced to Core `4db2d5eabf4b64bb9d7721262d6478f0ec9038bf`; the next run must reverify the cross-repository compatibility gate.
+The pinned Core also encrypts per-host private registry credentials in its single development V1 schema. Credential management is limited to the configured `ARTIO_EXTENSION_TRUSTED_REGISTRIES` allowlist and recent MFA-protected Backoffice administration. The exact Core pin above passed the local signed descriptor → idempotent install job → digest pull → worker completion acceptance. The Marketplace CI run for this pin remains the final cross-repository compatibility gate.
+
+The 2026-10-16 local integration follow-up provisions a separate ephemeral Ed25519 advisory key, matching the feed's independent signing trust. The successful isolated run published a signed Marketplace release, verified and revoked a signed advisory, exercised the proxy, and then had Core fetch and verify the immutable descriptor, create and replay a durable idempotent installation job, pull the exact OCI digest, and complete the job through the real Docker worker. PostgreSQL/API, Docker runtime, advisory ingestion, and Core unit tests passed. Core's duplicate `artio.storefront-url` YAML key found by an earlier run was removed. The interrupted prior run's exact project had no containers, volumes, or network when inspected; the successful run removed its own containers, network, three volumes, and temporary images. Core's current development database remains a single V1 schema snapshot.
 
 ## Template review
 
@@ -52,7 +54,7 @@ The full Backoffice install/configure/enable/invocation flow is verified for the
 
 Core's `ARTIO_EXTENSION_TRUSTED_REGISTRIES` defaults to empty. For a host-run development Core consuming the local Marketplace registry, configure `ARTIO_EXTENSION_TRUSTED_REGISTRIES=localhost:5000` (or the exact public registry host in the returned manifest). Because the local Compose profile uses plain HTTP, Docker Engine must also have that host in its `insecure-registries` configuration and be restarted. Do not use this HTTP exception for a remotely reachable deployment. If Core runs inside a container or VM, `localhost` refers to that network namespace; use the host's reachable registry name consistently in Core trust settings, image references, and the Marketplace allowlist.
 
-The missing development smoke is: obtain the exact manifest from Marketplace, call Core's `/api/v1/admin/extensions/validate`, register it, then call install and verify the Docker runtime pulls the digest from the trusted local Zot. This sequence has **not** been run against a live Core. CI's pinned runtime/controller/catalog tests are narrower and do not substitute for it. The Core checkout at `D:\Development\Projects\Artio` was already dirty during this review and must not be used as a disposable test target; use a clean isolated checkout or user-provided Core test environment.
+The live development smoke is now closed by the isolated Core/Marketplace acceptance above. That test uses a development fixture and the local Zot address routed through `host.docker.internal`; production deployments must still configure the exact trusted registry host in `ARTIO_EXTENSION_TRUSTED_REGISTRIES` and use TLS. CI's pinned runtime/controller/catalog tests remain independent checks rather than substitutes for the live signed descriptor and durable install acceptance.
 
 ## Compatibility verification
 
