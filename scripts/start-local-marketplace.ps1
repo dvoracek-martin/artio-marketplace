@@ -5,6 +5,7 @@ $stateDirectory = Join-Path $repoRoot '.local-marketplace'
 $envFile = Join-Path $stateDirectory '.env'
 $htpasswdFile = Join-Path $stateDirectory 'zot.htpasswd'
 $credentialsFile = Join-Path $stateDirectory 'credentials.txt'
+$advisoryTrustedKeyFile = Join-Path $stateDirectory 'advisory-trusted-key.txt'
 $composeFile = Join-Path $repoRoot 'deployment/compose.yaml'
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
@@ -53,6 +54,52 @@ function Set-ComposeEnvironmentFromFile([string]$Path) {
 function Test-DockerCommand([string]$Arguments) {
   & $env:ComSpec /d /c "docker $Arguments >nul 2>&1"
   return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-LocalAdvisorySigningKey {
+  $keyIdEntry = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^MARKETPLACE_ADVISORY_SIGNING_KEY_ID=.+$' } | Select-Object -First 1
+  $privateKeyEntry = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64=.+$' } | Select-Object -First 1
+  if ($keyIdEntry -and $privateKeyEntry -and (Test-Path -LiteralPath $advisoryTrustedKeyFile)) { return }
+
+  $openssl = $env:OPENSSL_BIN
+  if (-not $openssl -or -not (Test-Path -LiteralPath $openssl)) {
+    $opensslCommand = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($opensslCommand) { $openssl = $opensslCommand.Source }
+    elseif (Test-Path -LiteralPath 'C:\Program Files\Git\usr\bin\openssl.exe') { $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe' }
+  }
+  if (-not $openssl -or -not (Test-Path -LiteralPath $openssl)) {
+    throw 'OpenSSL is required to create the local Marketplace advisory signing key. Install Git for Windows or set OPENSSL_BIN.'
+  }
+
+  $keyTemp = Join-Path ([IO.Path]::GetTempPath()) ('artio-local-advisory-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $keyTemp | Out-Null
+  try {
+    $privatePem = Join-Path $keyTemp 'private.pem'
+    $privateDer = Join-Path $keyTemp 'private.der'
+    $publicDer = Join-Path $keyTemp 'public.der'
+    & $openssl genpkey -algorithm Ed25519 -out $privatePem
+    if ($LASTEXITCODE -ne 0) { throw 'Could not generate the local Marketplace advisory signing key.' }
+    & $openssl pkey -in $privatePem -outform DER -out $privateDer
+    if ($LASTEXITCODE -ne 0) { throw 'Could not encode the local Marketplace advisory signing key.' }
+    & $openssl pkey -in $privatePem -pubout -outform DER -out $publicDer
+    if ($LASTEXITCODE -ne 0) { throw 'Could not derive the local Marketplace advisory verification key.' }
+
+    $keyId = 'local-dev-' + (New-RandomHex 6)
+    $privateBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($privateDer))
+    $publicBase64Url = [Convert]::ToBase64String([IO.File]::ReadAllBytes($publicDer)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    $environment = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -notmatch '^MARKETPLACE_ADVISORY_SIGNING_(KEY_ID|PRIVATE_KEY_BASE64)=' })
+    $environment += "MARKETPLACE_ADVISORY_SIGNING_KEY_ID=$keyId"
+    $environment += "MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64=$privateBase64"
+    Write-Utf8File $envFile (($environment -join "`n") + "`n")
+    Write-Utf8File $advisoryTrustedKeyFile ("$keyId=$publicBase64Url`n")
+  } finally {
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $target = [IO.Path]::GetFullPath($keyTemp)
+    if ($target.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+      (Split-Path -Leaf $target).StartsWith('artio-local-advisory-', [StringComparison]::Ordinal)) {
+      Remove-Item -LiteralPath $target -Recurse -Force
+    }
+  }
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -132,6 +179,8 @@ Publisher OCI registry: localhost:$registryPublishPort
   throw "Local configuration exists at $stateDirectory but is incomplete. Review that folder before removing it and starting again."
 }
 
+Ensure-LocalAdvisorySigningKey
+
 $promotionPasswordFile = Join-Path $stateDirectory 'zot-promotion-password.txt'
 $hasPromotionPassword = Select-String -LiteralPath $envFile -Pattern '^MARKETPLACE_ZOT_PROMOTION_PASSWORD=.+$' -Quiet
 $hasPromoter = Select-String -LiteralPath $htpasswdFile -Pattern '^promoter:\$2[aby]\$' -Quiet
@@ -196,6 +245,7 @@ if (-not $ready) {
 Write-Host ''
 Write-Host 'Marketplace is ready.' -ForegroundColor Green
 Get-Content -LiteralPath (Join-Path $stateDirectory 'connection.txt')
+Write-Host "Core advisory trust key: $advisoryTrustedKeyFile"
 Write-Host "Zot registry UI:      http://127.0.0.1:$registryPort"
 Write-Host "Local API credentials: $stateDirectory (publisher-token.txt, admin-token.txt, revocation-token.txt)"
 Write-Host 'Keep that folder private. Stop with: docker compose --project-name artio-marketplace-local --env-file .local-marketplace/.env -f deployment/compose.yaml down'

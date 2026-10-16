@@ -14,7 +14,7 @@ Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and disc
 
 See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATIBILITY.md), the [acceptance evidence](docs/ACCEPTANCE.md), [OpenAPI](marketplace-contract/openapi.yaml), and the [publishing guide](docs/PUBLISHING.md).
 
-Private staging and digest-preserving OCI promotion are verified against the pinned Zot registry, including a multi-platform index. Marketplace issues signed immutable release descriptors and a signed security/support advisory feed, and Core verifies official release descriptors. Image provenance beyond the descriptor signature, Core advisory polling and local ban enforcement, and custom local archive installation remain open. A signed descriptor does not by itself prove image build provenance. See the [integration security roadmap](docs/ROADMAP.md) before treating a published plugin as fully verified.
+Private staging and digest-preserving OCI promotion are verified against the pinned Zot registry, including a multi-platform index. Marketplace issues signed immutable release descriptors and a signed security/support advisory feed, and Core verifies official release descriptors. The live cross-repository acceptance also verifies Core advisory-feed ingestion, persistent exact-digest bans, and Docker containment. Image provenance beyond the descriptor signature and custom local archive installation remain open. A signed descriptor does not by itself prove image build provenance. See the [integration security roadmap](docs/ROADMAP.md) before treating a published plugin as fully verified.
 
 ## Run the whole Marketplace with Docker
 
@@ -22,7 +22,7 @@ You do **not** need Java, Gradle, or a separately running Artio Core. Install an
 
 ### Windows: one click
 
-Double-click [`Start Marketplace.bat`](Start%20Marketplace.bat) in the repository root. The first start generates separate local publisher/admin/revocation tokens and a Zot password in the ignored `.local-marketplace` folder, selects available loopback ports, builds the Marketplace image, starts its dependencies, and waits for readiness. Later starts reuse the same credentials and data.
+Double-click [`Start Marketplace.bat`](Start%20Marketplace.bat) in the repository root. The first start generates separate local publisher/admin/revocation tokens, a Zot password, and a persistent development-only Ed25519 advisory signing key in the ignored `.local-marketplace` folder, selects available loopback ports, builds the Marketplace image, starts its dependencies, and waits for readiness. Later starts reuse the same credentials, signing identity, and data. The public advisory trust key is written to `.local-marketplace/advisory-trusted-key.txt`; the sibling Artio development launcher reads it automatically. Production deployments must provision their advisory public key out of band.
 
 The script prints the local addresses. Defaults are API `http://127.0.0.1:18080`, public registry `localhost:15000`, and publisher registry `localhost:15001`; if any is busy, it selects another free port. The Zot UI is available at `http://127.0.0.1:<public-registry-port>` (for example, `http://127.0.0.1:15000`). The API, management, and registry ports bind to loopback only. Docker-internal ports are isolated inside this Compose network. This keeps the default ports away from common Artio services and avoids taking ports already in use. The selected ports and credentials are recorded in `.local-marketplace`.
 
