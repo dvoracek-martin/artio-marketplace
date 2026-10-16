@@ -13,4 +13,6 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.15.3")
     testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
+    testImplementation("org.testcontainers:postgresql:1.21.3")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.3")
 }
