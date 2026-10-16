@@ -31,5 +31,5 @@
     }
   },
   "log": { "level": "info", "output": "/dev/stdout" },
-  "extensions": { "search": { "enable": false }, "sync": { "enable": false }, "ui": { "enable": true } }
+  "extensions": { "search": { "enable": true }, "sync": { "enable": false }, "ui": { "enable": true } }
 }
