@@ -1,6 +1,6 @@
 # Core backoffice integration contract
 
-This is the intended server-side boundary for a future Artio Core backoffice integration. It is not a claim that the current Core exposes these routes: the pinned Core source currently maps extension administration under the legacy `/api/admin/extensions` route. This Marketplace implements only the documented future versioned contract and does not modify Core.
+This documents the server-side boundary used by the current Artio Core Backoffice integration. Core exposes versioned proxy routes under `/api/v1/admin/extensions/marketplace/**`; it calls the configured public Marketplace API and never sends publisher or moderation credentials to the browser. The Core release-import flow currently consumes the original v1 runtime manifest and keeps installation/lifecycle responsibilities in Core.
 
 ## Intended Core responsibilities
 
@@ -8,6 +8,6 @@ Core remains responsible for installation, permissions, configuration, dependenc
 
 ## Future endpoint shape
 
-The Backoffice can discover plugins through the public Marketplace `/api/v1/marketplace/...` API. Core does not currently expose a Marketplace discovery endpoint. Once an administrator selects a release, the Backoffice submits its exact Core manifest through the existing versioned Core endpoints such as `POST /api/v1/admin/extensions/validate` and `POST /api/v1/admin/extensions/register`, then follows Core's configuration, install, and explicit enable lifecycle. Core runs its own current `PluginManifestValidator`, `PluginDependencyPolicy`, configuration validation, registry trust check, and runtime controller.
+The Backoffice discovers compatible plugins through Core's `/api/v1/admin/extensions/marketplace/plugins`, which calls the public Marketplace `/api/v1/marketplace/plugins` endpoint with Core's version and optional country. Selecting a release asks Core for its original manifest through `/api/v1/admin/extensions/marketplace/plugins/{pluginId}/releases/{version}/manifest`; Core then registers it through its own validator and follows the normal configuration, install, and explicit enable lifecycle. Runtime installation pulls the digest-pinned OCI image from the trusted registry. The Marketplace compatibility result is advisory: Core performs local validation for dependencies, geographic availability, registry trust, configuration, and runtime policy.
 
-Before shipping a Backoffice integration, define its server-side Marketplace authentication policy, pagination and locale behavior, and run end-to-end tests against the released Core version. Do not send publisher credentials to a browser or add legacy unversioned Core calls to Marketplace.
+Marketplace releases remain on the Core `PluginManifest` v1 contract throughout development, as directed for the pre-production product. Core capability/subscription v2 distribution is deferred until the first production release; do not add a second manifest format to Marketplace during the current development version. Preserve existing v1 listings and release artifacts. Never add unversioned Core API calls.
