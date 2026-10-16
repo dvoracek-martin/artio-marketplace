@@ -2,7 +2,11 @@ param(
   [string]$CorePath = 'D:\Development\Projects\Artio',
   [string]$ProjectName = 'artio-marketplace-signed-descriptor-acceptance',
   [string]$PythonPath = '',
-  [string]$CleanupTemporaryDirectory = ''
+  [string]$CleanupTemporaryDirectory = '',
+  [int]$ApiPort = 18080,
+  [int]$ManagementPort = 18081,
+  [int]$RegistryPort = 15100,
+  [int]$RegistryPublishPort = 15101
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +46,10 @@ if (-not (Test-Path -LiteralPath $CorePath)) { throw "Core checkout was not foun
 if (-not (Test-Path -LiteralPath $openssl)) { throw 'Git for Windows OpenSSL was not found.' }
 if (-not (Test-Path -LiteralPath $gitBash)) { throw 'Git Bash was not found.' }
 if ($ProjectName -notmatch '^[a-z0-9][a-z0-9_-]{2,50}$') { throw 'ProjectName must be a unique Docker Compose project name.' }
+if (@($ApiPort, $ManagementPort, $RegistryPort, $RegistryPublishPort | Sort-Object -Unique).Count -ne 4 -or
+    @($ApiPort, $ManagementPort, $RegistryPort, $RegistryPublishPort | Where-Object { $_ -lt 1024 -or $_ -gt 65535 }).Count -gt 0) {
+  throw 'Acceptance host ports must be four distinct TCP ports between 1024 and 65535.'
+}
 if ($CleanupTemporaryDirectory) {
   $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
   $cleanupTarget = [IO.Path]::GetFullPath($CleanupTemporaryDirectory)
@@ -119,11 +127,11 @@ try {
     'MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter',
     "MARKETPLACE_ZOT_PROMOTION_PASSWORD=$promoterPassword",
     'MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE=200',
-    'MARKETPLACE_REGISTRY_HOST=localhost:15100',
-    'MARKETPLACE_API_PORT=18080',
-    'MARKETPLACE_MANAGEMENT_PORT=18081',
-    'MARKETPLACE_REGISTRY_PORT=15100',
-    'MARKETPLACE_REGISTRY_PUBLISH_PORT=15101',
+    "MARKETPLACE_REGISTRY_HOST=localhost:$RegistryPort",
+    "MARKETPLACE_API_PORT=$ApiPort",
+    "MARKETPLACE_MANAGEMENT_PORT=$ManagementPort",
+    "MARKETPLACE_REGISTRY_PORT=$RegistryPort",
+    "MARKETPLACE_REGISTRY_PUBLISH_PORT=$RegistryPublishPort",
     "ZOT_HTPASSWD_FILE=$($htpasswdPath.Replace('\', '/'))"
   )
   [IO.File]::WriteAllLines($envFile, $values, [Text.UTF8Encoding]::new($false))
@@ -142,8 +150,8 @@ try {
   $bashTemp = Convert-ToBashPath $taskTemp
   $env:MARKETPLACE_COMPOSE_PROJECT = $ProjectName
   $env:MARKETPLACE_ENV_FILE = $composeEnv
-  $env:MARKETPLACE_URL = 'http://127.0.0.1:18080'
-  $env:MARKETPLACE_MANAGEMENT_URL = 'http://127.0.0.1:18081'
+  $env:MARKETPLACE_URL = "http://127.0.0.1:$ApiPort"
+  $env:MARKETPLACE_MANAGEMENT_URL = "http://127.0.0.1:$ManagementPort"
   $env:MARKETPLACE_PUBLISHER_TOKEN_FILE = "$bashTemp/publisher-token.txt"
   $env:MARKETPLACE_ADMIN_TOKEN_FILE = "$bashTemp/admin-token.txt"
   $env:MARKETPLACE_REVOCATION_TOKEN_FILE = "$bashTemp/revocation-token.txt"
@@ -151,10 +159,10 @@ try {
   $env:MARKETPLACE_SIGNING_PRIVATE_KEY_FILE = "$bashTemp/release-signing-key.pem"
   $env:MARKETPLACE_SIGNING_KEY_ID = $keyId
   $env:ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS = "$advisoryKeyId=$advisoryPublicKey"
-  $env:MARKETPLACE_REGISTRY_HOST = 'localhost:15100'
-  $env:MARKETPLACE_REGISTRY_CONNECT_HOST = 'localhost:15100'
-  $env:MARKETPLACE_REGISTRY_PUBLISH_HOST = 'localhost:15101'
-  $env:MARKETPLACE_REGISTRY_PUBLISH_CONNECT_HOST = 'localhost:15101'
+  $env:MARKETPLACE_REGISTRY_HOST = "localhost:$RegistryPort"
+  $env:MARKETPLACE_REGISTRY_CONNECT_HOST = "localhost:$RegistryPort"
+  $env:MARKETPLACE_REGISTRY_PUBLISH_HOST = "localhost:$RegistryPublishPort"
+  $env:MARKETPLACE_REGISTRY_PUBLISH_CONNECT_HOST = "localhost:$RegistryPublishPort"
   if ($PythonPath) {
     if (-not (Test-Path -LiteralPath $PythonPath)) { throw "Python executable was not found: $PythonPath" }
     $env:MARKETPLACE_PYTHON = Convert-ToBashPath (Resolve-Path -LiteralPath $PythonPath).Path
@@ -171,7 +179,7 @@ try {
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
       try {
-        $response = Invoke-WebRequest -Uri 'http://127.0.0.1:18081/actuator/health/readiness' -TimeoutSec 3
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$ManagementPort/actuator/health/readiness" -TimeoutSec 3
         if ($response.StatusCode -eq 200) { $ready = $true; break }
       } catch { Start-Sleep -Seconds 3 }
     }

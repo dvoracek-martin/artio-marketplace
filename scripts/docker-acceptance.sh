@@ -626,7 +626,7 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')
   export ARTIO_MARKETPLACE_TRUSTED_KEYS="$MARKETPLACE_SIGNING_KEY_ID=$signing_public_key"
   export ARTIO_EXTENSION_TRUSTED_REGISTRIES=${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-$registry}
-  if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
+  if (cd "$core_path" && bash ./gradlew --no-daemon --max-workers=1 :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured \
@@ -655,6 +655,11 @@ PY
     fi
     echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
   fi
+fi
+
+if [[ $core_status != 0 ]]; then
+  echo 'Docker acceptance could not confirm the pinned Core Marketplace integration gates.' >&2
+  exit "$core_status"
 fi
 
 rate_limit=${MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
