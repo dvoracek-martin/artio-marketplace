@@ -4,8 +4,8 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `9edd334a8cdd55b17f11b4af84304fe0f190c571`
-- This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, and signed Marketplace advisory verification with local exact-digest enforcement. Marketplace CI checks out this commit in an isolated workspace and does not modify Core.
+- Commit: `4db2d5eabf4b64bb9d7721262d6478f0ec9038bf` (`feat(extensions): support trusted private registries`)
+- This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, signed Marketplace advisory verification with local exact-digest enforcement, and encrypted credentials for explicitly trusted private OCI registries. Marketplace CI checks out this commit in an isolated workspace and does not modify Core.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
 ## Runtime manifest contracts observed at the pinned commit
@@ -33,6 +33,8 @@ Core commit `9edd334a8cdd55b17f11b4af84304fe0f190c571` adds a focused verifier t
 ## Publication recovery acceptance
 
 Marketplace CI run `38943007707` passed `PublicationRecoveryPostgresIntegrationTest` against the current single V1 schema snapshot. It injects a partial OCI copy failure and retries the same approved release, recovers an expired promotion reservation after process interruption, and races a plugin moderation suspension against publication finalization. Each failed attempt remains retryable and cannot mark the release `PUBLISHED` until the full promotion and final moderation check pass. The same workflow passed the live Zot/Marketplace acceptance, backup/restore smoke pull, vulnerability scan and ephemeral Compose cleanup. No incremental schema or V1-to-V2 upgrade migration is part of this gate.
+
+The pinned Core also encrypts per-host private registry credentials in its single development V1 schema. Credential management is limited to the configured `ARTIO_EXTENSION_TRUSTED_REGISTRIES` allowlist and recent MFA-protected Backoffice administration. The Marketplace CI pin is being advanced to Core `4db2d5eabf4b64bb9d7721262d6478f0ec9038bf`; the next run must reverify the cross-repository compatibility gate.
 
 ## Template review
 
