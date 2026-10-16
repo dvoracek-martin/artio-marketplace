@@ -6,6 +6,9 @@ $envFile = Join-Path $stateDirectory '.env'
 $htpasswdFile = Join-Path $stateDirectory 'zot.htpasswd'
 $credentialsFile = Join-Path $stateDirectory 'credentials.txt'
 $advisoryTrustedKeyFile = Join-Path $stateDirectory 'advisory-trusted-key.txt'
+$releaseTrustedKeyFile = Join-Path $stateDirectory 'release-trusted-key.txt'
+$releaseSigningKeyFile = Join-Path $stateDirectory 'release-signing-key.pem'
+$signingIngestTokenFile = Join-Path $stateDirectory 'signing-ingest-token.txt'
 $composeFile = Join-Path $repoRoot 'deployment/compose.yaml'
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
@@ -102,6 +105,75 @@ function Ensure-LocalAdvisorySigningKey {
   }
 }
 
+function Protect-LocalSecretFile([string]$Path) {
+  $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $acl = [System.Security.AccessControl.FileSecurity]::new()
+  $acl.SetOwner([System.Security.Principal.NTAccount]::new($identity))
+  $acl.SetAccessRuleProtection($true, $false)
+  $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+    $identity, 'FullControl', 'Allow')
+  $acl.AddAccessRule($rule)
+  Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Ensure-LocalReleaseSigningKey {
+  $environment = @(Get-Content -LiteralPath $envFile)
+  $keyIdEntry = $environment | Where-Object { $_ -match '^MARKETPLACE_SIGNING_KEY_ID=.+$' } | Select-Object -First 1
+  $trustedEntry = $environment | Where-Object { $_ -match '^MARKETPLACE_SIGNING_TRUSTED_KEYS=.+$' } | Select-Object -First 1
+  $ingestEntry = $environment | Where-Object { $_ -match '^MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256=.+$' } | Select-Object -First 1
+  $existing = @($keyIdEntry, $trustedEntry, $ingestEntry) | Where-Object { $_ }
+  if ($existing.Count -gt 0) {
+    if ($existing.Count -ne 3 -or -not (Test-Path -LiteralPath $releaseTrustedKeyFile) -or
+      -not (Test-Path -LiteralPath $releaseSigningKeyFile) -or -not (Test-Path -LiteralPath $signingIngestTokenFile)) {
+      throw 'Local Marketplace release-signing state is incomplete. Refusing to replace a possibly trusted development key.'
+    }
+    return
+  }
+
+  $openssl = $env:OPENSSL_BIN
+  if (-not $openssl -or -not (Test-Path -LiteralPath $openssl)) {
+    $opensslCommand = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($opensslCommand) { $openssl = $opensslCommand.Source }
+    elseif (Test-Path -LiteralPath 'C:\Program Files\Git\usr\bin\openssl.exe') { $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe' }
+  }
+  if (-not $openssl -or -not (Test-Path -LiteralPath $openssl)) {
+    throw 'OpenSSL is required to create the local Marketplace release-signing key. Install Git for Windows or set OPENSSL_BIN.'
+  }
+
+  $keyTemp = Join-Path ([IO.Path]::GetTempPath()) ('artio-local-release-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $keyTemp | Out-Null
+  try {
+    $privatePem = Join-Path $keyTemp 'private.pem'
+    $publicDer = Join-Path $keyTemp 'public.der'
+    & $openssl genpkey -algorithm Ed25519 -out $privatePem
+    if ($LASTEXITCODE -ne 0) { throw 'Could not generate the local Marketplace release-signing key.' }
+    & $openssl pkey -in $privatePem -pubout -outform DER -out $publicDer
+    if ($LASTEXITCODE -ne 0) { throw 'Could not derive the local Marketplace release verification key.' }
+
+    $keyId = 'local-dev-release-' + (New-RandomHex 6)
+    $publicBase64Url = [Convert]::ToBase64String([IO.File]::ReadAllBytes($publicDer)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    $signingToken = New-RandomHex
+    Copy-Item -LiteralPath $privatePem -Destination $releaseSigningKeyFile
+    [IO.File]::WriteAllText($signingIngestTokenFile, $signingToken + "`n", $utf8NoBom)
+    Protect-LocalSecretFile $releaseSigningKeyFile
+    Protect-LocalSecretFile $signingIngestTokenFile
+    Write-Utf8File $releaseTrustedKeyFile ("$keyId=$publicBase64Url`n")
+
+    $environment = @(Get-Content -LiteralPath $envFile)
+    $environment += "MARKETPLACE_SIGNING_KEY_ID=$keyId"
+    $environment += "MARKETPLACE_SIGNING_TRUSTED_KEYS=$keyId=$publicBase64Url"
+    $environment += "MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256=$(Get-Sha256 $signingToken)"
+    Write-Utf8File $envFile (($environment -join "`n") + "`n")
+  } finally {
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $target = [IO.Path]::GetFullPath($keyTemp)
+    if ($target.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+      (Split-Path -Leaf $target).StartsWith('artio-local-release-', [StringComparison]::Ordinal)) {
+      Remove-Item -LiteralPath $target -Recurse -Force
+    }
+  }
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   throw 'Docker is not installed or is not on PATH. Install/start Docker Desktop and try again.'
 }
@@ -180,6 +252,7 @@ Publisher OCI registry: localhost:$registryPublishPort
 }
 
 Ensure-LocalAdvisorySigningKey
+Ensure-LocalReleaseSigningKey
 
 $promotionPasswordFile = Join-Path $stateDirectory 'zot-promotion-password.txt'
 $hasPromotionPassword = Select-String -LiteralPath $envFile -Pattern '^MARKETPLACE_ZOT_PROMOTION_PASSWORD=.+$' -Quiet
@@ -246,6 +319,11 @@ Write-Host ''
 Write-Host 'Marketplace is ready.' -ForegroundColor Green
 Get-Content -LiteralPath (Join-Path $stateDirectory 'connection.txt')
 Write-Host "Core advisory trust key: $advisoryTrustedKeyFile"
+Write-Host "Core release trust key: $releaseTrustedKeyFile"
 Write-Host "Zot registry UI:      http://127.0.0.1:$registryPort"
 Write-Host "Local API credentials: $stateDirectory (publisher-token.txt, admin-token.txt, revocation-token.txt)"
 Write-Host 'Keep that folder private. Stop with: docker compose --project-name artio-marketplace-local --env-file .local-marketplace/.env -f deployment/compose.yaml down'
+
+$env:MARKETPLACE_DEV_SEED_PROFILE = 'local-development'
+& (Join-Path $repoRoot 'scripts/seed-dev-minio-release.ps1') -CorePath (Join-Path $repoRoot '..\Artio')
+if ($LASTEXITCODE -ne 0) { throw 'The owner-authorized local MinIO development seed failed.' }
