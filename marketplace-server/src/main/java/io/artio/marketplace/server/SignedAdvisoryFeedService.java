@@ -80,7 +80,7 @@ public class SignedAdvisoryFeedService {
           ORDER BY r.release_id,s.signed_at DESC
         )
         SELECT s.release_id::text,s.plugin_id,s.version,s.descriptor_sha256,
-               COALESCE(l.image_digests, (SELECT jsonb_agg(image->>'digest' ORDER BY image->>'role')::text
+               COALESCE(l.image_digests, (SELECT jsonb_agg(DISTINCT image->>'digest' ORDER BY image->>'digest')::text
                    FROM jsonb_array_elements(s.descriptor_document::jsonb->'images') image)),
                COALESCE(l.support_status,CASE WHEN s.publication_state='PUBLISHED' THEN 'SUPPORTED' ELSE 'REMOVED' END),
                COALESCE(l.security_status,'ALLOWED'),COALESCE(l.banned_image_digests,'[]'),

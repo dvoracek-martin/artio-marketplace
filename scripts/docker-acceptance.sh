@@ -85,6 +85,7 @@ for advisory in payload['advisories']:
     assert advisory['securityStatus'] in ('ALLOWED', 'BANNED')
     assert advisory['supportStatus'] in ('SUPPORTED', 'UNSUPPORTED', 'REMOVED')
     assert advisory['status'] == ('BANNED' if advisory['securityStatus'] == 'BANNED' else advisory['supportStatus'])
+    assert len(advisory['imageDigests']) == len(set(advisory['imageDigests']))
     assert set(advisory['bannedImageDigests']).issubset(advisory['imageDigests'])
 if sys.argv[4]:
     banned=[item for item in payload['advisories']
