@@ -4,7 +4,7 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `eb3d79e355d1db9b150d64bfee93ec61a19d3802`
+- Commit: `9edd334a8cdd55b17f11b4af84304fe0f190c571`
 - This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, and signed Marketplace advisory verification with local exact-digest enforcement. Marketplace CI checks out this commit in an isolated workspace and does not modify Core.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
@@ -27,6 +27,8 @@ Core's extension management and Marketplace proxy controllers are versioned unde
 ## Live signed-advisory acceptance
 
 Marketplace CI run `38941144533` passed with Core commit `eb3d79e355d1db9b150d64bfee93ec61a19d3802`. It provisioned a feed-specific Ed25519 key, revoked `marketplace.reference@1.2.9`, then had Core fetch, verify and persist that live signed snapshot and its permanent image-digest ban. The same run passed Marketplace manifest import and the selected restricted Docker runtime tests; the fixture-gated egress test remains skipped. The published advisory feed deduplicates image digests when a release uses the same digest for multiple roles, matching Core's strict signed-inventory validation.
+
+Core commit `9edd334a8cdd55b17f11b4af84304fe0f190c571` adds a focused verifier test for signing-key rotation: both old and new release signatures pass while their keys overlap, and the retired key is rejected after it is removed from the trust set. Marketplace tests exercise a generated-key rotation in PostgreSQL for release descriptors and through the signed advisory snapshot service. The keys are generated per test; no production private key or external credential is required.
 
 ## Publication recovery acceptance
 

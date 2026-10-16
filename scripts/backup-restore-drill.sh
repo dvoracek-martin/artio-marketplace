@@ -40,8 +40,12 @@ echo "Capturing a consistent point-in-time set for Compose project $project."
 "${compose[@]}" restart marketplace >/dev/null
 wait_for
 manifest_url="$api_base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.0/manifest"
+descriptor_url="$api_base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.0/descriptor"
+advisories_url="$api_base/api/v1/marketplace/security/advisories"
 before_manifest=$(curl --fail --silent --show-error "$manifest_url")
 before_image=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["image"])' <<<"$before_manifest")
+curl --fail --silent --show-error "$descriptor_url" -o "$backup_dir/release-descriptor.before.json"
+curl --fail --silent --show-error "$advisories_url" -o "$backup_dir/advisories.before.json"
 
 # Stop the API/Zot container to freeze catalog, media and registry writes while
 # the logical PostgreSQL dump and file-volume archives are captured.
@@ -92,9 +96,34 @@ after_manifest=$(curl --fail --silent --show-error "$manifest_url")
   echo 'The immutable published manifest changed across the restore drill.' >&2
   exit 1
 }
+curl --fail --silent --show-error "$descriptor_url" -o "$backup_dir/release-descriptor.after.json"
+curl --fail --silent --show-error "$advisories_url" -o "$backup_dir/advisories.after.json"
+python3 - "$backup_dir/release-descriptor.before.json" "$backup_dir/release-descriptor.after.json" \
+  "$backup_dir/advisories.before.json" "$backup_dir/advisories.after.json" <<'PY'
+import json, sys
+
+def load(path):
+    with open(path, encoding='utf-8') as source:
+        return json.load(source)
+
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+release_before, release_after, feed_before, feed_after = map(load, sys.argv[1:])
+assert release_before['signature']['algorithm'] == 'Ed25519'
+assert release_before['signature']['keyId'] == release_after['signature']['keyId']
+assert release_before['descriptor'] == release_after['descriptor']
+assert release_before['signature'] == release_after['signature'], 'Stored release signature changed after restore'
+assert feed_before['signature']['algorithm'] == 'Ed25519'
+assert feed_before['signature']['keyId'] == feed_before['payload']['keyId']
+assert feed_before['signature'] == feed_after['signature'], 'Advisory signature changed after restore'
+assert feed_before['payload'] == feed_after['payload'], 'Signed advisory payload changed after restore'
+assert canonical(release_before) == canonical(release_after)
+assert canonical(feed_before) == canonical(feed_after)
+PY
 after_image=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["image"])' <<<"$after_manifest")
 [[ $after_image == "$before_image" ]] || { echo 'The restored manifest points at a different image digest.' >&2; exit 1; }
 docker pull "$after_image"
 curl --fail --silent --show-error "$api_base/api/v1/marketplace/plugins/marketplace.reference?locale=en" | grep -q 'Artio Reference Extension'
 
-echo 'Backup/restore drill passed: fresh PostgreSQL, Zot and media volumes restored; published manifest remained byte-for-byte identical and its OCI digest pulled successfully.'
+echo 'Backup/restore drill passed: fresh PostgreSQL, Zot and media volumes restored; published manifest, signed release descriptor and signed advisory snapshot were identical, and the OCI digest pulled successfully.'
