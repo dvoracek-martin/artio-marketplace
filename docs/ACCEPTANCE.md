@@ -12,7 +12,7 @@ These results describe the predecessor implementation before the hardening work.
 
 The source candidate is based on Marketplace hardening baseline `0f1d76e42908978911c7b10667827e033b38bc19`. Local verification on 2026-10-16 completed the Java 25 unit/architecture tests (including digest-verifier tests), Redocly OpenAPI lint, V1-to-V2 migration with pre-existing ambiguous rows, acceptance fail-closed self-check, full Compose/PostgreSQL/Zot Docker acceptance, PostgreSQL/Zot/media backup/restore with an exact manifest comparison and digest pull, and direct sensitive Actuator deny checks. The live acceptance output reached its final `Docker acceptance passed` line. Current detailed finding-by-finding status and residual risks are in [post-implementation hardening](POST_IMPLEMENTATION_HARDENING.md).
 
-The exact combined `spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` run failed locally when google-java-format threw `NoClassDefFoundError` for Guava nested classes during `spotlessJavaCheck`; separate clean-home `spotlessCheck` passed, and `clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification -x spotlessCheck` passed. Hosted CI will determine whether the combined task failure reproduces on its clean runner. Hosted SBOM/Trivy and pinned Core results are pending. No pinned Core test result is inferred from local Marketplace acceptance.
+The exact combined local `spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` command failed in this Windows Docker environment when google-java-format threw `NoClassDefFoundError` for Guava nested classes during `spotlessJavaCheck`; separate clean-home `spotlessCheck` passed, and `clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification -x spotlessCheck` passed. Hosted CI passed the combined compile/format/unit/architecture/coverage step. No pinned Core test result is inferred from local Marketplace acceptance.
 
 ## Results
 
@@ -35,9 +35,22 @@ The exact combined `spotlessCheck clean build jacocoTestReport :marketplace-doma
 | Local Windows end-to-end Docker acceptance | NOT RUN for the latest outage/restore script | Previous local OCI acceptance evidence predates the added outage scenario; the current live acceptance is run in isolated GitHub CI. |
 | Scaling to thousands of independent Core installations | NOT RUN | Architecture has no per-customer Core connections or Docker socket, but no representative load profile or throughput test has been performed. |
 
+## Post-hardening GitHub Actions run
+
+Hardening commit `e9bca63db6fa5653e1909bec8135739d907d0ba8` was pushed to `main`. GitHub Actions run [38833700448](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38833700448) completed with **failure**. This is the expected fail-closed result for the unresolved pinned Core integration test, not a green Marketplace release gate:
+
+- Java 25 compile, formatting, unit/architecture tests, and coverage: **PASS**.
+- OpenAPI lint, V1-to-V2 migration, acceptance-gate failure injection, and Marketplace/PostgreSQL/Zot startup: **PASS**.
+- Live Zot/OCI/public API acceptance step: **FAIL** because the pinned Core `PackagedExtensionControllerIntegrationTests.packagedControllerAuthenticatesAndManagesPrivateBundleWithoutCommerceServices` failed at Core test line 146 with `NullPointerException` while dereferencing `remote.health(current).healthy()`. The Marketplace workflow checks out Core in a separate workspace; Core was not changed.
+- Isolated PostgreSQL/Zot/media backup and restore with manifest comparison and digest pull: **PASS**, including after the acceptance failure.
+- SPDX SBOM generation: **PASS**; artifact upload: **SKIPPED** because the required acceptance gate failed.
+- Trivy HIGH/CRITICAL image scan and ephemeral stack teardown: **PASS**.
+
+The hosted run confirms that the CI gate now reports the pinned Core failure instead of suppressing it. The Core controller flow remains unverified as passing and needs a separately scoped Core fix. The Marketplace changes are pushed, but this workflow is red and the release gate is not green.
+
 ## GitHub Actions run contents
 
-The successful run 38827486941 reported:
+The successful predecessor run 38827486941 reported:
 
 - Gradle, Spotless, unit/architecture tests and JaCoCo: PASS.
 - OpenAPI lint: PASS.
@@ -47,7 +60,7 @@ The successful run 38827486941 reported:
 - Trivy image scan: PASS under the time-limited upstream Zot/Tomcat CVE exceptions in `.trivyignore` and [Security](SECURITY.md).
 - Ephemeral Compose teardown with volumes: PASS.
 
-The predecessor run used `continue-on-error`, which is documented above as a historical baseline defect. The hardened workflow has a required live acceptance step without that suppression; failure keeps the job red. Restore, SBOM, Trivy and teardown use independent `always()`/cleanup conditions so diagnostics and cleanup continue after an acceptance failure. The result of the pushed hardening commit must be recorded here without hiding pinned Core failures.
+The predecessor run used `continue-on-error`, which is documented above as a historical baseline defect. The hardened workflow has a required live acceptance step without that suppression; run 38833700448 confirms the job remains red on the pinned Core failure. Restore, SBOM, Trivy and teardown use independent `always()`/cleanup conditions so diagnostics and cleanup continue after an acceptance failure.
 
 ## Compatibility boundary
 
@@ -55,4 +68,4 @@ Marketplace returns the original Core `PluginManifest v1` document and does not 
 
 ## Docker cleanup
 
-CI uses a uniquely named acceptance Compose project and a cleanup step that runs `docker compose down -v`. The acceptance script's exit trap removes its uniquely named reference-plugin container, temporary image tags/digest references, and package directory. The restore drill is explicitly gated, uses only that disposable project, and deletes only its three named volumes. Neither workflow nor scripts call a global Docker prune. Local acceptance credentials, temporary package files, project stack volumes and test-only images were removed after the earlier local run.
+CI uses a uniquely named acceptance Compose project and a cleanup step that runs `docker compose down -v`. The acceptance script's exit trap removes its uniquely named reference-plugin container, temporary image tags/digest references, and package directory. The restore drill is explicitly gated, uses only that disposable project, and deletes only its three named volumes. Neither workflow nor scripts call a global Docker prune. The local Docker containers, project volumes, and test-only images created during this work were removed. The Windows execution policy blocked deletion of the ignored local `.env` and `secrets/` acceptance credentials; those files were not tracked or pushed and remain a local cleanup item.
