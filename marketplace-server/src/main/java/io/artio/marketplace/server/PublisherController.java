@@ -60,6 +60,14 @@ public class PublisherController {
     this.publisherTokenHash = publisherTokenHash;
     this.adminTokenHash = adminTokenHash;
     this.revocationTokenHash = revocationTokenHash;
+    var configuredCredentials =
+        List.of(publisherTokenHash, adminTokenHash, revocationTokenHash).stream()
+            .filter(value -> value != null && !value.isBlank())
+            .map(value -> value.toLowerCase(java.util.Locale.ROOT))
+            .toList();
+    if (configuredCredentials.stream().distinct().count() != configuredCredentials.size())
+      throw new IllegalArgumentException(
+          "Publisher, admin, and revocation credentials must be unique");
   }
 
   @PostMapping("/releases/validate")
@@ -191,6 +199,14 @@ public class PublisherController {
     return lookupDraft(releaseId);
   }
 
+  @GetMapping("/releases/{releaseId}/review")
+  public Map<String, Object> reviewDraft(
+      @PathVariable String releaseId,
+      @RequestHeader(value = "Authorization", required = false) String auth) {
+    authenticate(auth, adminTokenHash, "admin");
+    return lookupDraft(releaseId);
+  }
+
   @PutMapping("/releases/{releaseId}/catalog")
   @Transactional
   public Map<String, Object> replaceCatalog(
@@ -205,7 +221,7 @@ public class PublisherController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", v.errors()));
     int updated =
         jdbc.update(
-            "UPDATE marketplace_releases SET metadata=?::jsonb,publication_state='VALIDATED',row_version=row_version+1 WHERE release_id=?::uuid AND publication_state IN ('DRAFT','VALIDATED') AND row_version=?",
+            "UPDATE marketplace_releases SET metadata=?::jsonb,publication_state='VALIDATED',publication_approval_state='PENDING',publication_approved_by=NULL,publication_approved_at=NULL,approved_manifest_sha256=NULL,approved_catalog_sha256=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state IN ('DRAFT','VALIDATED') AND row_version=?",
             json(catalog),
             releaseId,
             Long.parseLong(r.get("rowVersion")));
@@ -213,6 +229,79 @@ public class PublisherController {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Release is no longer editable");
     audit("UPDATE_CATALOG", r.get("pluginId") + "@" + r.get("version"), "OK");
     return lookupDraft(releaseId);
+  }
+
+  @PostMapping("/releases/{releaseId}/approve")
+  @Transactional
+  public Map<String, Object> approve(
+      @PathVariable String releaseId,
+      @RequestBody(required = false) ApprovalRequest request,
+      @RequestHeader(value = "Authorization", required = false) String auth) {
+    authenticate(auth, adminTokenHash, "admin");
+    if (request == null
+        || request.reason() == null
+        || request.reason().isBlank()
+        || request.reason().length() > 1000)
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "An approval review reason is required");
+
+    var release = releaseRow(releaseId);
+    if (!"VALIDATED".equals(release.get("state")))
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Only a validated draft can be approved");
+    if (!"ACTIVE".equals(release.get("moderation")))
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Plugin moderation blocks release approval");
+
+    String manifestDigest = release.get("manifestSha256");
+    String catalogDigest = sha(release.get("metadata"));
+    if (!manifestDigest.equals(sha(release.get("manifest"))))
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Stored manifest digest is inconsistent");
+
+    if ("APPROVED".equals(release.get("approvalState"))) {
+      if (manifestDigest.equals(release.get("approvedManifestSha256"))
+          && catalogDigest.equals(release.get("approvedCatalogSha256")))
+        return Map.of(
+            "releaseId",
+            releaseId,
+            "approvalState",
+            "APPROVED",
+            "approvedBy",
+            release.get("approvedBy"),
+            "idempotent",
+            true);
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Approval no longer matches the staged release content");
+    }
+
+    int changed =
+        jdbc.update(
+            "UPDATE marketplace_releases SET publication_approval_state='APPROVED',publication_approved_by='admin',publication_approved_at=now(),approved_manifest_sha256=?,approved_catalog_sha256=?,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND publication_approval_state='PENDING' AND row_version=? AND manifest_sha256=?",
+            manifestDigest,
+            catalogDigest,
+            releaseId,
+            Long.parseLong(release.get("rowVersion")),
+            manifestDigest);
+    if (changed != 1)
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Release changed during approval; review the current draft and retry");
+    jdbc.update(
+        "INSERT INTO marketplace_audit(actor,action,target,outcome,details) VALUES ('admin','APPROVE_RELEASE',?,'OK',?::jsonb)",
+        release.get("pluginId") + "@" + release.get("version"),
+        json(
+            mapper.valueToTree(
+                Map.of(
+                    "reason", request.reason(),
+                    "manifestSha256", manifestDigest,
+                    "catalogSha256", catalogDigest))));
+    return Map.of(
+        "releaseId", releaseId,
+        "approvalState", "APPROVED",
+        "approvedBy", "admin",
+        "manifestSha256", manifestDigest,
+        "catalogSha256", catalogDigest);
   }
 
   @org.springframework.web.bind.annotation.PostMapping(
@@ -264,13 +353,20 @@ public class PublisherController {
     if (!"VALIDATED".equals(r.get("state")))
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release is not in a publishable state");
+    if (!"APPROVED".equals(r.get("approvalState"))
+        || !r.get("manifestSha256").equals(r.get("approvedManifestSha256"))
+        || !sha(r.get("metadata")).equals(r.get("approvedCatalogSha256")))
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Release requires separate admin approval for the exact manifest and catalog content");
     if (!"ACTIVE".equals(r.get("moderation")))
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Plugin moderation blocks publication");
     int reserved =
         jdbc.update(
-            "UPDATE marketplace_releases SET publication_state='PUBLISHING',publishing_started_at=now(),row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
-            releaseId);
+            "UPDATE marketplace_releases SET publication_state='PUBLISHING',publishing_started_at=now(),row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND publication_approval_state='APPROVED' AND approved_manifest_sha256=manifest_sha256 AND approved_catalog_sha256=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
+            releaseId,
+            sha(r.get("metadata")));
     if (reserved != 1)
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release or plugin moderation changed; retry");
@@ -314,9 +410,10 @@ public class PublisherController {
               status -> {
                 int changed =
                     jdbc.update(
-                        "UPDATE marketplace_releases SET publication_state='PUBLISHED',published_at=now(),publishing_started_at=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='PUBLISHING' AND row_version=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
+                        "UPDATE marketplace_releases SET publication_state='PUBLISHED',published_at=now(),publishing_started_at=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='PUBLISHING' AND row_version=? AND publication_approval_state='APPROVED' AND approved_manifest_sha256=manifest_sha256 AND approved_catalog_sha256=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
                         releaseId,
-                        reservationVersion);
+                        reservationVersion,
+                        sha(r.get("metadata")));
                 if (changed == 1)
                   audit("PUBLISH", r.get("pluginId") + "@" + r.get("version"), "OK");
                 return changed;
@@ -496,6 +593,8 @@ public class PublisherController {
 
   private record Submission(JsonNode manifest, JsonNode catalog) {}
 
+  private record ApprovalRequest(String reason) {}
+
   private record ModerationRequest(String state, String reason) {}
 
   private record RevocationRequest(String category, String reason) {}
@@ -525,23 +624,21 @@ public class PublisherController {
   private Map<String, String> releaseRow(String id) {
     try {
       return jdbc.queryForObject(
-          "SELECT r.plugin_id,r.version,r.manifest_document,r.metadata::text,r.publication_state,r.row_version,p.moderation_state FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.release_id=?::uuid",
+          "SELECT r.plugin_id,r.version,r.manifest_document,r.metadata::text,r.publication_state,r.row_version,p.moderation_state,r.manifest_sha256,r.publication_approval_state,coalesce(r.publication_approved_by,''),coalesce(r.approved_manifest_sha256,''),coalesce(r.approved_catalog_sha256,'') FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.release_id=?::uuid",
           (rs, n) ->
-              Map.of(
-                  "pluginId",
-                  rs.getString(1),
-                  "version",
-                  rs.getString(2),
-                  "manifest",
-                  rs.getString(3),
-                  "metadata",
-                  rs.getString(4),
-                  "state",
-                  rs.getString(5),
-                  "rowVersion",
-                  rs.getString(6),
-                  "moderation",
-                  rs.getString(7)),
+              Map.ofEntries(
+                  Map.entry("pluginId", rs.getString(1)),
+                  Map.entry("version", rs.getString(2)),
+                  Map.entry("manifest", rs.getString(3)),
+                  Map.entry("metadata", rs.getString(4)),
+                  Map.entry("state", rs.getString(5)),
+                  Map.entry("rowVersion", rs.getString(6)),
+                  Map.entry("moderation", rs.getString(7)),
+                  Map.entry("manifestSha256", rs.getString(8)),
+                  Map.entry("approvalState", rs.getString(9)),
+                  Map.entry("approvedBy", rs.getString(10)),
+                  Map.entry("approvedManifestSha256", rs.getString(11)),
+                  Map.entry("approvedCatalogSha256", rs.getString(12))),
           id);
     } catch (org.springframework.dao.EmptyResultDataAccessException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft not found");
@@ -550,19 +647,18 @@ public class PublisherController {
 
   private Map<String, Object> lookupDraft(String id) {
     var r = releaseRow(id);
-    return Map.of(
-        "releaseId",
-        id,
-        "pluginId",
-        r.get("pluginId"),
-        "version",
-        r.get("version"),
-        "state",
-        r.get("state"),
-        "manifest",
-        parse(r.get("manifest")),
-        "catalog",
-        parse(r.get("metadata")));
+    return Map.ofEntries(
+        Map.entry("releaseId", id),
+        Map.entry("pluginId", r.get("pluginId")),
+        Map.entry("version", r.get("version")),
+        Map.entry("state", r.get("state")),
+        Map.entry("approvalState", r.get("approvalState")),
+        Map.entry("approvedBy", r.get("approvedBy")),
+        Map.entry("manifestSha256", r.get("manifestSha256")),
+        Map.entry("approvedManifestSha256", r.get("approvedManifestSha256")),
+        Map.entry("approvedCatalogSha256", r.get("approvedCatalogSha256")),
+        Map.entry("manifest", parse(r.get("manifest"))),
+        Map.entry("catalog", parse(r.get("metadata"))));
   }
 
   private boolean assetExists(String id) {

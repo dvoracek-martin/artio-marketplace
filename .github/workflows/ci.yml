@@ -33,8 +33,8 @@ jobs:
         run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
       - name: Lint OpenAPI 3.1 contract
         run: npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml
-      - name: Verify the V1 to V2 migration on disposable PostgreSQL
-        run: bash ./scripts/test-v2-migration.sh
+      - name: Verify V1 to V3 migrations on disposable PostgreSQL
+        run: bash ./scripts/test-v3-migration.sh
       - name: Prepare isolated Docker acceptance credentials
         shell: bash
         run: |

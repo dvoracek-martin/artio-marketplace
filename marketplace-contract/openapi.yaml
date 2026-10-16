@@ -130,6 +130,16 @@ paths:
         '200': {description: Publisher-only release record}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/review:
+    get:
+      operationId: reviewDraft
+      summary: Retrieve staged manifest, catalog and digests for admin review
+      security: [{adminToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      responses:
+        '200': {description: Review-only staged release content}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /api/v1/admin/marketplace/releases/{releaseId}/catalog:
     put:
       operationId: replaceDraftCatalog
@@ -158,11 +168,33 @@ paths:
   /api/v1/admin/marketplace/releases/{releaseId}/publish:
     post:
       operationId: publishRelease
-      summary: Revalidate and publish a release atomically
+      summary: Revalidate and publish a separately admin-approved release atomically
       security: [{publisherToken: []}]
       parameters: [{$ref: '#/components/parameters/ReleaseId'}]
       responses:
         '200': {description: Published release}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/approve:
+    post:
+      operationId: approveRelease
+      summary: Approve the exact staged manifest and catalog using the separate admin credential
+      security: [{adminToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {description: Approved release content digests}
+        '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}

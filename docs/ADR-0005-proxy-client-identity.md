@@ -11,4 +11,4 @@ Public and publisher requests use separate per-client windows and global admissi
 
 ## Consequences and limits
 
-Deployment operators must configure the exact proxy networks that can reach the API and prevent direct public access to application ports. No private network, Docker subnet or Cloudflare header is trusted automatically. The example proxy integration tests exercise public routing, admin network denial and actuator denial; proxy-chain unit tests cover right-to-left resolution and CIDR matching.
+Deployment operators must configure the exact proxy networks that can reach the API and prevent direct public access to application ports. No private network, Docker subnet or Cloudflare header is trusted automatically. Without a trusted proxy entry, clients behind that proxy intentionally share the socket-peer bucket; replace the `.env.example` placeholder with the exact proxy peer address/CIDR observed by the app. The example proxy integration tests exercise public routing, admin network denial and actuator denial; proxy-chain unit tests cover right-to-left resolution, spoofed-leftmost input, bucket-cap eviction, and CIDR matching.

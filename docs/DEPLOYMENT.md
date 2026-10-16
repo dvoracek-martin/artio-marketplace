@@ -17,7 +17,7 @@ Start with `docker compose --env-file .env -f deployment/compose.yaml up --build
 ## Production checklist
 
 - Use HTTPS, HSTS, strict host routing, and request size/time limits at the proxy. Prevent direct Internet access to container ports.
-- Configure `MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES` with exact addresses or CIDRs for actual proxy peers when using trusted `X-Forwarded-For`; otherwise the API rate limiter keys requests by the socket peer. The supplied Nginx example sanitizes the header to `$remote_addr`. Tune per-client and global rate limits for expected traffic.
+- Replace the `MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES` placeholder with exact addresses or CIDRs for the actual proxy peers, as seen by Marketplace. Without this, clients behind one proxy share that proxy's socket-peer bucket and can collectively consume the per-client allowance. Never guess the Docker bridge address or trust a broad private range. The supplied Nginx example sanitizes XFF to `$remote_addr`; tune edge and application per-client/global limits for expected traffic.
 - Store publisher, admin, revocation, and Zot credentials in a secret manager and rotate them independently. Limit the admin endpoint at the network boundary.
 - Set resource limits based on measured image sizes, database growth, and upload traffic; Compose values are local defaults, not capacity guidance.
 - Configure PostgreSQL PITR or scheduled encrypted backups, registry/media backups, restore drills, off-host copies, and retention.

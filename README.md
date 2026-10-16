@@ -1,11 +1,11 @@
 # Artio Marketplace
 
-Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and discovering Artio Core plugins. It includes PostgreSQL metadata, a pinned Zot OCI registry, a versioned public REST API, and separate publisher, moderation, and revocation credentials. The service validates the exact plugin manifest contract copied from Artio Core `911f8196b1d76113804e274009e07ada17f15b33`; it does not change or embed Core.
+Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and discovering Artio Core plugins. It includes PostgreSQL metadata, a pinned Zot OCI registry, a versioned public REST API, and separate publisher, moderation, and revocation credentials. Releases require publisher staging and separate admin approval bound to the exact manifest and catalog before publication. The service validates the exact plugin manifest contract copied from Artio Core `911f8196b1d76113804e274009e07ada17f15b33`; it does not change or embed Core.
 
 ## Current scope
 
 - Public catalog, search, plugin and release details, media delivery, compatible release selection, and publisher listing controls.
-- Manual publisher workflow for digest-pinned OCI images, localized metadata, screenshots, icon, and release notes.
+- Two-person manual release workflow for digest-pinned OCI images, localized metadata, screenshots, icon, and release notes.
 - PostgreSQL migrations and immutable release records; OCI registry and uploaded media are persisted separately.
 - Combined Marketplace + Zot container and PostgreSQL Compose deployment.
 - Backoffice UI, payments, and licensing are intentionally out of scope.
@@ -16,7 +16,7 @@ See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATI
 
 Prerequisites: Docker Engine with Compose v2. Build requires Internet access to Maven Central and the pinned base images.
 
-1. Create `.env` from `.env.example`. Replace the PostgreSQL password with a unique secret. Create separate random publisher, admin, and revocation bearer tokens of at least 32 characters and set each `*_TOKEN_SHA256` to its lowercase SHA-256 hex digest. Keep each raw token in its own protected file. The API stores only their hashes.
+1. Create `.env` from `.env.example`. Replace the PostgreSQL password with a unique secret. Create separate random publisher, admin, and revocation bearer tokens of at least 32 characters and set each `*_TOKEN_SHA256` to its lowercase SHA-256 hex digest. Keep each raw token in its own protected file. The API stores only their hashes and refuses duplicate role credentials. Replace the trusted-proxy placeholder with the exact proxy peer address/CIDR observed by Marketplace; leave it empty only when calling the local API directly without a reverse proxy. Do not trust a guessed or broad network range.
 2. Create a bcrypt htpasswd file with a user named `publisher`; place it outside this repository and set `ZOT_HTPASSWD_FILE` to its absolute path. With Docker and Apache `htpasswd`, run `docker run --rm -it httpd:2.4-alpine htpasswd -B -C 12 publisher`, enter a separate Zot password, and save the resulting single `publisher:$2y$...` line to that file. Restrict file access.
 3. Start the stack: `docker compose --env-file .env -f deployment/compose.yaml up --build -d`.
 4. Wait for `docker compose --env-file .env -f deployment/compose.yaml ps` to show Marketplace, PostgreSQL, and the small registry gateway healthy. Check management readiness at `http://127.0.0.1:8081/actuator/health/readiness` and the public registry ping at `http://localhost:5000/v2/`. Actuator is not served on the public API port.
@@ -25,7 +25,7 @@ The Marketplace image contains Java and Zot. PostgreSQL is separate. Nginx expos
 
 ## Tests and builds
 
-Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting `MARKETPLACE_PUBLISHER_TOKEN_FILE` and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to a read-only pinned Core checkout to run isolated runtime/controller contract tests; no deployed or customer Core instance is required. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting the publisher/admin/revocation token file paths and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to a read-only pinned Core checkout only when running isolated runtime/controller contract tests; no deployed or customer Core instance is required. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 ## First manual publication
 

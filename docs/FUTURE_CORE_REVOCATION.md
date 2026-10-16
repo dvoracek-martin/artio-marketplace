@@ -1,6 +1,6 @@
 # Future signed revocation advisory contract
 
-This document records a future interoperability boundary. Marketplace does not currently publish this feed, Artio Core does not currently consume it, and there is no remote kill switch. The document alone is not a claim of signing, delivery, or enforcement.
+This document records a critical open interoperability boundary. Marketplace does not currently publish this feed, Artio Core does not currently consume it, and there is no remote kill switch. The Marketplace-only release revocation prevents future catalog selection/install but cannot notify or disable already-installed customer plugins. The document alone is not a claim of signing, delivery, or enforcement. Closing this finding requires a separate Artio Core change and must not be claimed complete by a Marketplace-only patch.
 
 ## Intended purpose
 

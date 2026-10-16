@@ -46,11 +46,11 @@ Example `catalog.json` (replace all values and asset paths):
 }
 ```
 
-## 3. Validate, create, upload, publish
+## 3. Validate and stage a release
 
-The included script calls the `/api/v1` publisher API in order, validates OCI images, uploads icon and screenshot files, attaches their content-addressed IDs, then publishes. It prints the public release URL and manifest digest.
+The included script calls the `/api/v1` publisher API, validates OCI images, uploads icon and screenshot files, and stages the complete release for review. It prints a `releaseId` and manifest digest. It does not publish the release.
 
-PowerShell 7 (preview with `-WhatIf`; run without it to publish):
+PowerShell 7 (preview with `-WhatIf`; run without it to stage for review):
 
 ```powershell
 $tokenPath = 'C:\secure\marketplace-publisher-token.txt'
@@ -65,11 +65,46 @@ export MARKETPLACE_PUBLISHER_TOKEN_FILE=/secure/marketplace-publisher-token.txt
 ./scripts/publish-plugin.sh ./plugins/stock-sync https://marketplace.example.com
 ```
 
-The token file contains the raw Marketplace bearer token, not the Zot password. Protect it with OS file permissions and exclude it from shell history and source control. Dry run validates without creating a release or uploading media. Use a unique immutable version per plugin release. The script derives an idempotency key from plugin id, version, and manifest bytes; retrying identical content returns the same release. Content changes to a version already created are rejected; publish a new version instead.
+The token file contains the raw Marketplace publisher bearer token, not the Zot password. Protect it with OS file permissions and exclude it from shell history and source control. Dry run validates without creating a release or uploading media. Use a unique immutable version per plugin release. The script derives an idempotency key from plugin id, version, and manifest bytes; retrying identical content returns the same staged release. Content changes to a version already created are rejected; publish a new version instead.
 
-## 4. Verify public availability
+## 4. Independently review and approve
 
-PowerShell 7 (preview with `-WhatIf`; run without it to publish):
+An operator who does not hold the publisher token must inspect the exact staged manifest, catalog, and image digests through the admin-only review endpoint:
+
+```bash
+export MARKETPLACE_ADMIN_TOKEN_FILE=/secure/marketplace-admin-token.txt
+./scripts/approve-release.sh RELEASE_ID https://marketplace.example.com "Reviewed OCI digests and catalog for release 1.0.0"
+```
+
+The approval records hashes of both the runtime manifest and catalog metadata. Any catalog edit clears approval and requires the operator to review it again. The publisher cannot approve; the admin token cannot publish. The configured publisher, admin, and revocation token hashes must be distinct, and the application refuses duplicate credentials.
+
+PowerShell 7 can perform the same review and approval call:
+
+```powershell
+$base = 'https://marketplace.example.com'
+$releaseId = 'RELEASE_ID'
+$adminToken = (Get-Content -Raw 'C:\secure\marketplace-admin-token.txt').Trim()
+$adminHeaders = @{ Authorization = "Bearer $adminToken" }
+$draft = Invoke-RestMethod -Method Get -Uri "$base/api/v1/admin/marketplace/releases/$releaseId/review" -Headers $adminHeaders
+# Inspect $draft.manifest, $draft.catalog, and $draft.manifestSha256 before approval.
+$approval = @{ reason = 'Reviewed OCI digests and catalog for release 1.0.0' } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Post -Uri "$base/api/v1/admin/marketplace/releases/$releaseId/approve" -Headers $adminHeaders -ContentType 'application/json' -Body $approval
+$publisherToken = (Get-Content -Raw 'C:\secure\marketplace-publisher-token.txt').Trim()
+Invoke-RestMethod -Method Post -Uri "$base/api/v1/admin/marketplace/releases/$releaseId/publish" -Headers @{ Authorization = "Bearer $publisherToken" }
+```
+
+After approval, the publisher completes publication with its separate credential:
+
+```bash
+export MARKETPLACE_PUBLISHER_TOKEN_FILE=/secure/marketplace-publisher-token.txt
+./scripts/publish-staged-release.sh RELEASE_ID https://marketplace.example.com
+```
+
+This manual separation reduces the impact of compromise of either one API token. It is not a cryptographic signature/provenance check: the administrator must review the digest and trust the image provenance out of band. Artio Core does not verify signatures and is not changed by this approval flow.
+
+## 5. Verify public availability
+
+PowerShell 7:
 
 ```powershell
 .\scripts\verify-published-plugin.ps1 -PluginId 'com.example.stock-sync' -Version '1.0.0' -MarketplaceUrl 'https://marketplace.example.com'
@@ -83,9 +118,9 @@ Bash:
 
 The verifier fetches the public release/manifest and checks that each digest-pinned image can be pulled. If the platform cannot pull from a local HTTP registry, configure registry trust or test through the production HTTPS hostname.
 
-## 5. Manual API sequence
+## 6. Manual API sequence
 
-Publisher calls use `Authorization: Bearer <token>` and `/api/v1/admin/marketplace/...` paths. Call `POST /releases/validate`, then `POST /releases` with a stable `Idempotency-Key` (8–160 safe characters). Upload each file as `multipart/form-data` to `POST /releases/{releaseId}/assets?kind=icon|screenshot`; set returned `assetId` values in metadata and send the complete metadata to `PUT /releases/{releaseId}/catalog`. Finish with `POST /releases/{releaseId}/publish`. See [OpenAPI](../marketplace-contract/openapi.yaml) for details.
+Publisher calls use `Authorization: Bearer <publisher-token>` and `/api/v1/admin/marketplace/...` paths. Call `POST /releases/validate`, then `POST /releases` with a stable `Idempotency-Key` (8–160 safe characters). Upload each file as `multipart/form-data` to `POST /releases/{releaseId}/assets?kind=icon|screenshot`; set returned `assetId` values in metadata and send the complete metadata to `PUT /releases/{releaseId}/catalog`. A separate admin uses `GET /releases/{releaseId}/review` to inspect the exact staged content and `POST /releases/{releaseId}/approve` with a review reason. The publisher then calls `POST /releases/{releaseId}/publish`. See [OpenAPI](../marketplace-contract/openapi.yaml) for details.
 
-Release publication requires the publisher token. Unlisting a single published release and plugin moderation (`ACTIVE`, `SUSPENDED`, `BANNED`) require the separate admin token. Revoking one release requires the separate revocation token and a reason/category (`SECURITY`, `MALWARE`, `POLICY`, `LEGAL`, `OTHER`). Revocation returns HTTP 410 for that release and removes it from recommendations; it does not disable installed plugins, mutate other release states, or issue a remote kill command. Publication audit is available from `GET /api/v1/admin/marketplace/publication-audit` using the admin token. The sample reverse proxy restricts all admin routes to an operator network.
+Publication is a two-person API workflow: a publisher token stages and publishes only after an admin token approves that exact manifest and catalog; neither token can perform both halves. Unlisting a single published release and plugin moderation (`ACTIVE`, `SUSPENDED`, `BANNED`) require the separate admin token. Revoking one release requires the separate revocation token and a reason/category (`SECURITY`, `MALWARE`, `POLICY`, `LEGAL`, `OTHER`). Revocation returns HTTP 410 for that release and removes it from recommendations; it does not notify Core, disable installed plugins, mutate other release states, or issue a remote kill command. Publication audit is available from `GET /api/v1/admin/marketplace/publication-audit` using the admin token. The sample reverse proxy restricts all admin routes to an operator network.
 

@@ -15,7 +15,7 @@ $submission=@{manifest=$manifest;catalog=$catalog};$body=$submission|ConvertTo-J
 $validate=Invoke-RestMethod -Method Post -Uri "$base/api/v1/admin/marketplace/releases/validate" -Headers $headers -ContentType 'application/json' -Body $body
 if(!$validate.valid){throw "Marketplace validation failed: $($validate.errors -join '; ')"}
 $manifestHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant();$key="publish-$($manifest.id)-$($manifest.version)-$manifestHash"
-if(!$PSCmdlet.ShouldProcess("$($manifest.id) $($manifest.version)",'Create release, upload assets and publish')){Write-Host 'Validation passed; WhatIf prevented publication.';return}
+if(!$PSCmdlet.ShouldProcess("$($manifest.id) $($manifest.version)",'Create release, upload assets and stage for separate admin review')){Write-Host 'Validation passed; WhatIf prevented staging.';return}
 $draft=Invoke-RestMethod -Method Post -Uri "$base/api/v1/admin/marketplace/releases" -Headers ($headers+@{'Idempotency-Key'=$key}) -ContentType 'application/json' -Body $body;$release=$draft.releaseId
 if($draft.state -eq 'PUBLISHED'){Write-Host "Already published $($manifest.id) $($manifest.version) (idempotent retry).";return}
 $client=[System.Net.Http.HttpClient]::new();$client.DefaultRequestHeaders.Authorization=[System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer',$token)
@@ -25,7 +25,7 @@ try{
  for($i=0;$i-lt $shotFiles.Count;$i++){$catalog.screenshots[$i].assetId=(& $upload $shotFiles[$i] screenshot).assetId}
  $catBody=$catalog|ConvertTo-Json -Depth 100 -Compress
  Invoke-RestMethod -Method Put -Uri "$base/api/v1/admin/marketplace/releases/$release/catalog" -Headers $headers -ContentType 'application/json' -Body $catBody|Out-Null
- $published=Invoke-RestMethod -Method Post -Uri "$base/api/v1/admin/marketplace/releases/$release/publish" -Headers $headers
- Write-Host "Published $($manifest.id) $($manifest.version): $base/api/v1/marketplace/plugins/$($manifest.id)/releases/$($manifest.version)"
+ Write-Host "Staged $($manifest.id) $($manifest.version) for separate admin review."
+ Write-Host "Release ID: $release"
  Write-Host "Manifest digest: $($validate.manifestDigest)"
 }finally{$client.Dispose();$token=$null;$headers=$null}

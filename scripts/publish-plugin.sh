@@ -44,8 +44,7 @@ def upload(path, kind):
 catalog['icon']=upload(icon,'icon')
 for i,path in enumerate(shots):catalog['screenshots'][i]['assetId']=upload(path,'screenshot')
 request(f'/api/v1/admin/marketplace/releases/{rid}/catalog','PUT',catalog)
-result=request(f'/api/v1/admin/marketplace/releases/{rid}/publish','POST')
-print(f"Published {manifest['id']} {manifest['version']}: {base}/api/v1/marketplace/plugins/{manifest['id']}/releases/{manifest['version']}")
+print(f"Staged {manifest['id']} {manifest['version']} for separate admin review.")
 print('releaseId='+rid)
 print('manifestDigest='+validation['manifestDigest'])
 PY

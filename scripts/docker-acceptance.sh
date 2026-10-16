@@ -29,6 +29,8 @@ trap cleanup EXIT
 : "${MARKETPLACE_PUBLISHER_TOKEN_FILE:?Set the test publisher-token file path}"
 : "${MARKETPLACE_ADMIN_TOKEN_FILE:?Set the test admin-token file path}"
 : "${MARKETPLACE_REVOCATION_TOKEN_FILE:?Set the test revocation-token file path}"
+publisher_token=$(cat "$MARKETPLACE_PUBLISHER_TOKEN_FILE")
+admin_token=$(cat "$MARKETPLACE_ADMIN_TOKEN_FILE")
 python3 - <<'PY'
 import json
 with open('deployment/zot/config.json', encoding='utf-8') as source:
@@ -138,6 +140,42 @@ JSON
   publish_output=$(./scripts/publish-plugin.sh "$release_dir" "$base")
   printf '%s\n' "$publish_output"
   ./scripts/publish-plugin.sh "$release_dir" "$base"
+  staged_release_id=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1)
+  python3 - "$base" "$staged_release_id" "$publisher_token" "$admin_token" <<'PY'
+import json, sys, urllib.error, urllib.request
+base, release_id, publisher, admin = sys.argv[1:]
+root = '/api/v1/admin/marketplace/releases/' + release_id
+def request(path, method='GET', token=publisher, payload=None):
+    headers = {'Authorization': 'Bearer ' + token}
+    data = None if payload is None else json.dumps(payload).encode()
+    if data is not None: headers['Content-Type'] = 'application/json'
+    req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, None
+status, review = request(root + '/review', token=admin)
+assert status == 200 and review['approvalState'] == 'PENDING', 'Admin could not inspect staged release'
+status, _ = request(root + '/approve', 'POST', payload={'reason': 'publisher must not self-approve'})
+assert status == 401, f'Publisher approval returned HTTP {status}'
+status, _ = request(root + '/publish', 'POST', token=admin)
+assert status == 401, f'Admin-only publish returned HTTP {status}'
+status, _ = request(root + '/publish', 'POST')
+assert status == 409, f'Unapproved release publish returned HTTP {status}'
+status, approved = request(root + '/approve', 'POST', token=admin,
+                            payload={'reason': 'acceptance review of exact staged manifest and catalog'})
+assert status == 200 and approved['approvalState'] == 'APPROVED', 'Admin approval failed'
+status, _ = request(root + '/catalog', 'PUT', payload=review['catalog'])
+assert status == 200, f'Catalog edit returned HTTP {status}'
+status, _ = request(root + '/publish', 'POST')
+assert status == 409, 'A catalog edit did not invalidate admin approval'
+status, approved = request(root + '/approve', 'POST', token=admin,
+                            payload={'reason': 're-review after catalog update'})
+assert status == 200 and approved['approvalState'] == 'APPROVED', 'Re-approval failed'
+PY
+  MARKETPLACE_PUBLISHER_TOKEN_FILE="$MARKETPLACE_PUBLISHER_TOKEN_FILE" \
+    ./scripts/publish-staged-release.sh "$staged_release_id" "$base" >/dev/null
   if [[ $version == 1.2.0 ]]; then release_id_120=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
   if [[ $version == 1.2.9 ]]; then release_id_129=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
 
@@ -173,8 +211,6 @@ assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?
 assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0&includePrerelease=true')['version'] == '1.4.0-rc.1'
 PY
 echo 'SemVer release selection checks passed.'
-publisher_token=$(cat "$MARKETPLACE_PUBLISHER_TOKEN_FILE")
-admin_token=$(cat "$MARKETPLACE_ADMIN_TOKEN_FILE")
 revocation_token=$(cat "$MARKETPLACE_REVOCATION_TOKEN_FILE")
 python3 - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
 import json, sys, urllib.error, urllib.request
@@ -210,11 +246,11 @@ curl --fail --silent -X POST -H "Authorization: Bearer $admin_token" -H 'Content
 suspended_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0")
 [[ $suspended_status == 404 ]] || { echo 'Suspended plugin remained recommended.' >&2; exit 1; }
-python3 - "$base" "$publisher_token" "$release_id_120" <<'PY'
+python3 - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
 import json, sys, urllib.error, urllib.request
-base, token, source_id = sys.argv[1:]
-def request(path, method='GET', payload=None, key=None):
-    headers = {'Authorization': 'Bearer ' + token}
+base, token, admin, source_id = sys.argv[1:]
+def request(path, method='GET', payload=None, key=None, credential=token):
+    headers = {'Authorization': 'Bearer ' + credential}
     if key: headers['Idempotency-Key'] = key
     data = None if payload is None else json.dumps(payload).encode()
     if data is not None: headers['Content-Type'] = 'application/json'
@@ -233,6 +269,9 @@ catalog['releaseNotes']['en'] = 'Suspended publication rejection check.'
 status, created = request('/api/v1/admin/marketplace/releases', 'POST',
                           {'manifest': manifest, 'catalog': catalog}, 'suspended-publish-9.0.0')
 assert status == 201, f'Could not reserve suspended release check: HTTP {status}'
+status, _ = request('/api/v1/admin/marketplace/releases/' + created['releaseId'] + '/approve', 'POST',
+                    {'reason': 'suspended plugin must block release approval'}, credential=admin)
+assert status == 409, f'Suspended plugin approval returned HTTP {status}'
 status, _ = request('/api/v1/admin/marketplace/releases/' + created['releaseId'] + '/publish', 'POST')
 assert status == 409, f'Suspended plugin publication returned HTTP {status}'
 PY
