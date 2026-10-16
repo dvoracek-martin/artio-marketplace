@@ -641,6 +641,16 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
     fi
   else
     core_status=$?
+    advisory_report="$core_path/artio-rest-api/build/test-results/integrationTest/TEST-io.artio.api.extensions.MarketplaceAdvisoryAcceptanceIntegrationTests.xml"
+    if [[ -f $advisory_report ]]; then
+      "$python" - "$advisory_report" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+for failure in root.iter('failure'):
+    print('Marketplace advisory Core acceptance failure: ' + (failure.get('message') or failure.text or 'unknown failure'), file=sys.stderr)
+PY
+    fi
     echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
   fi
 fi
