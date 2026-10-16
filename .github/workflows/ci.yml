@@ -73,7 +73,7 @@ jobs:
         env:
           MARKETPLACE_RESTORE_DRILL: '1'
           MARKETPLACE_ENV_FILE: .env
-        run: ./scripts/backup-restore-drill.sh
+        run: bash ./scripts/backup-restore-drill.sh
       - name: Capture diagnostics on failure
         if: failure()
         run: |
