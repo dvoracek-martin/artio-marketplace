@@ -111,6 +111,14 @@ paths:
         '200': {description: Highest compatible release selected by SemVer precedence, content: {application/json: {schema: {type: object}}}}
         '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /api/v1/marketplace/security/advisories:
+    get:
+      operationId: getSignedSecurityAdvisories
+      summary: Retrieve the signed, monotonic Core security and support snapshot
+      responses:
+        '200': {description: Signed RFC 8785 payload and Ed25519 envelope, content: {application/json: {schema: {$ref: './signed-advisory-feed-v1.schema.json'}}}}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /api/v1/marketplace/categories:
     get:
       operationId: getCategories
@@ -253,6 +261,62 @@ paths:
         '200': {description: Revoked release; public OCI blobs remain accessible}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/support:
+    post:
+      operationId: setReleaseSupportStatus
+      summary: Set the release-scoped Core support status without changing publication or lifecycle state
+      security: [{adminToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [supportStatus, reasonCode, explanations]
+              properties:
+                supportStatus: {type: string, enum: [SUPPORTED, UNSUPPORTED, REMOVED]}
+                reasonCode: {type: string, pattern: '^[A-Z][A-Z0-9_]{0,47}$'}
+                explanations: {$ref: '#/components/schemas/LocalizedExplanation'}
+      responses:
+        '200': {description: Append-only support status event and new feed sequence}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/ban:
+    post:
+      operationId: banRelease
+      summary: Ban every exact OCI digest in a signed release descriptor
+      security: [{revocationToken: []}]
+      parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/BanAdvisory'}}}}
+      responses:
+        '200': {description: Append-only release ban event and new feed sequence}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/releases/{releaseId}/ban-image:
+    post:
+      operationId: banReleaseImageDigest
+      summary: Ban one exact image digest declared by a release, including shared sidecars
+      security: [{revocationToken: []}]
+      parameters:
+        - {$ref: '#/components/parameters/ReleaseId'}
+        - {name: digest, in: query, required: true, schema: {$ref: '#/components/schemas/OciDigest'}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/BanAdvisory'}}}}
+      responses:
+        '200': {description: Append-only exact-digest ban event and new feed sequence}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/plugins/{pluginId}/ban:
+    post:
+      operationId: banAllSignedPluginReleases
+      summary: Explicitly ban every signed release of a plugin package
+      security: [{revocationToken: []}]
+      parameters: [{$ref: '#/components/parameters/PluginId'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/BanAdvisory'}}}}
+      responses:
+        '200': {description: Append-only package-scope set of exact release/image digest bans}
+        '401': {$ref: '#/components/responses/Error'}
   /api/v1/admin/marketplace/publication-audit:
     get:
       operationId: getPublicationAudit
@@ -306,6 +370,24 @@ components:
       properties:
         category: {type: string, enum: [SECURITY, MALWARE, POLICY, LEGAL, OTHER]}
         reason: {type: string, minLength: 1, maxLength: 1000}
+    LocalizedExplanation:
+      type: object
+      additionalProperties: false
+      required: [en]
+      properties:
+        en: {type: string, minLength: 1, maxLength: 500, pattern: '^[^<>]+$'}
+        de: {type: string, minLength: 1, maxLength: 500, pattern: '^[^<>]+$'}
+        fr: {type: string, minLength: 1, maxLength: 500, pattern: '^[^<>]+$'}
+        it: {type: string, minLength: 1, maxLength: 500, pattern: '^[^<>]+$'}
+    BanAdvisory:
+      type: object
+      additionalProperties: false
+      required: [reasonCode, severity, explanations]
+      properties:
+        reasonCode: {type: string, pattern: '^[A-Z][A-Z0-9_]{0,47}$'}
+        severity: {type: string, enum: [HIGH, CRITICAL]}
+        explanations: {$ref: '#/components/schemas/LocalizedExplanation'}
+    OciDigest: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
     SemVer: {type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'}
     Error:
       type: object

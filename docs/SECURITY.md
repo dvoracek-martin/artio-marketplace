@@ -18,7 +18,7 @@ Publisher, admin, and revocation tokens are separate shared operator credentials
 
 ## Known scope limits
 
-There is no backoffice UI, payment, or licensing system. OCI signing/provenance verification and signed release descriptors are not implemented yet: two-party review and digest-checked promotion do not cryptographically prove image origin, and Core does not verify a Marketplace signature. Core does not validate installed dependency state at marketplace publication time; Marketplace checks the copied manifest contract and image digests but cannot assert that a future Core instance satisfies installation-time policy. Core's pinned source maps versioned `/api/v1/admin/extensions/**` requests through its API versioning filter; see [compatibility notes](CORE_COMPATIBILITY.md). Revocation removes a release from future Marketplace selection but cannot notify customer Cores or disable a plugin already installed; no signed advisory consumer exists yet.
+There is no backoffice UI, payment, or licensing system. Marketplace signs immutable release descriptors and Core verifies those signatures; this does not establish image build provenance, and Core does not validate installed dependency state at Marketplace publication time. Marketplace also publishes a separately signed support/security advisory feed, but Core-side polling, durable verification state and local ban enforcement are still open. Release revocation cannot directly notify a customer Core or disable an installed plugin; there is no remote Core control channel. Core's pinned source maps versioned `/api/v1/admin/extensions/**` requests through its API versioning filter; see [compatibility notes](CORE_COMPATIBILITY.md).
 
 ## Temporary upstream vulnerability exceptions (review by 2026-10-30)
 

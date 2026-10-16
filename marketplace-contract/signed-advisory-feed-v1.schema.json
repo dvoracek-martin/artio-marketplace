@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://artio.example/schemas/signed-advisory-feed-v1.schema.json",
+  "title": "Artio signed Marketplace advisory snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "signature"],
+  "properties": {
+    "payload": { "$ref": "#/$defs/payload" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "keyId", "value"],
+      "properties": {
+        "algorithm": { "const": "Ed25519" },
+        "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$" },
+        "value": { "type": "string", "pattern": "^[A-Za-z0-9_-]{80,100}$" }
+      }
+    }
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sequence", "issuedAt", "expiresAt", "keyId", "advisories"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "issuedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,120}$" },
+        "advisories": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["advisoryId", "pluginId", "version", "releaseDescriptorDigest", "imageDigests", "bannedImageDigests", "supportStatus", "securityStatus", "status", "scope", "severity", "reasonCode", "explanations", "issuedAt"],
+            "properties": {
+              "advisoryId": { "type": "string", "format": "uuid" },
+              "pluginId": { "type": "string", "minLength": 1, "maxLength": 160 },
+              "version": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "releaseDescriptorDigest": { "$ref": "#/$defs/digest" },
+              "imageDigests": { "$ref": "#/$defs/digests" },
+              "bannedImageDigests": { "$ref": "#/$defs/digests" },
+              "supportStatus": { "enum": ["SUPPORTED", "UNSUPPORTED", "REMOVED"] },
+              "securityStatus": { "enum": ["ALLOWED", "BANNED"] },
+              "status": { "enum": ["SUPPORTED", "UNSUPPORTED", "REMOVED", "BANNED"] },
+              "scope": { "const": "RELEASE" },
+              "severity": { "enum": ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+              "reasonCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,47}$" },
+              "explanations": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["en"],
+                "properties": {
+                  "en": { "$ref": "#/$defs/plainText" },
+                  "de": { "$ref": "#/$defs/plainText" },
+                  "fr": { "$ref": "#/$defs/plainText" },
+                  "it": { "$ref": "#/$defs/plainText" }
+                }
+              },
+              "issuedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "digests": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/digest" } },
+    "plainText": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^<>]+$" }
+  }
+}

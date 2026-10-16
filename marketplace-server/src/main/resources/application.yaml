@@ -83,5 +83,11 @@ marketplace:
   signing:
     ingest-token-sha256: ${MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256:}
     trusted-keys: ${MARKETPLACE_SIGNING_TRUSTED_KEYS:}
+  advisory:
+    signing:
+      key-id: ${MARKETPLACE_ADVISORY_SIGNING_KEY_ID:}
+      private-key-base64: ${MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64:}
+    feed-ttl: ${MARKETPLACE_ADVISORY_FEED_TTL:PT24H}
+    feed-refresh-cron: ${MARKETPLACE_ADVISORY_FEED_REFRESH_CRON:0 0 */6 * * *}
   media:
     root: ${MARKETPLACE_MEDIA_ROOT:./data/assets}

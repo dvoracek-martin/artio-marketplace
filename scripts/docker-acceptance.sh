@@ -65,6 +65,57 @@ PY
     "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/descriptor" \
     | "$python" -c 'import json,sys; x=json.load(sys.stdin); assert x["signature"]["algorithm"] == "Ed25519" and x["descriptor"]["version"] == sys.argv[1]' "$version"
 }
+verify_advisory_feed() {
+  local expected_banned_version=${1:-}
+  curl --fail --silent --show-error "$base/api/v1/marketplace/security/advisories" \
+    -o "$package/advisories.json"
+  "$python" - "$package/advisories.json" "$package/advisory-payload.json" \
+    "$package/advisory-signature.bin" "$expected_banned_version" <<'PY'
+import base64, json, sys
+with open(sys.argv[1], encoding='utf-8') as source:
+    envelope=json.load(source)
+payload=envelope['payload']
+signature=envelope['signature']
+assert signature['algorithm'] == 'Ed25519'
+assert signature['keyId'] == payload['keyId']
+assert payload['schemaVersion'] == 1 and payload['sequence'] > 0
+assert payload['expiresAt'] > payload['issuedAt']
+assert isinstance(payload['advisories'], list)
+for advisory in payload['advisories']:
+    assert advisory['securityStatus'] in ('ALLOWED', 'BANNED')
+    assert advisory['supportStatus'] in ('SUPPORTED', 'UNSUPPORTED', 'REMOVED')
+    assert advisory['status'] == ('BANNED' if advisory['securityStatus'] == 'BANNED' else advisory['supportStatus'])
+    assert set(advisory['bannedImageDigests']).issubset(advisory['imageDigests'])
+if sys.argv[4]:
+    banned=[item for item in payload['advisories']
+            if item['pluginId'] == 'marketplace.reference' and item['version'] == sys.argv[4]]
+    assert len(banned) == 1 and banned[0]['securityStatus'] == 'BANNED'
+    assert banned[0]['bannedImageDigests'] == banned[0]['imageDigests']
+with open(sys.argv[2], 'w', encoding='utf-8') as target:
+    target.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')))
+with open(sys.argv[3], 'wb') as target:
+    target.write(base64.urlsafe_b64decode(signature['value'] + '=' * (-len(signature['value']) % 4)))
+PY
+  if [[ -n ${ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS:-} ]]; then
+    local trusted_id=${ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS%%=*}
+    local trusted_key=${ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS#*=}
+    local feed_key_id
+    feed_key_id=$("$python" -c 'import json,sys;print(json.load(open(sys.argv[1]))["signature"]["keyId"])' "$package/advisories.json")
+    [[ $trusted_id == "$feed_key_id" ]] || {
+      echo 'Marketplace advisory key id did not match the independent trust configuration.' >&2
+      return 1
+    }
+    "$python" - "$trusted_key" "$package/advisory-public-key.der" <<'PY'
+import base64, sys
+with open(sys.argv[2], 'wb') as target:
+    target.write(base64.urlsafe_b64decode(sys.argv[1] + '=' * (-len(sys.argv[1]) % 4)))
+PY
+    openssl pkey -pubin -inform DER -in "$package/advisory-public-key.der" \
+      -out "$package/advisory-public-key.pem" >/dev/null 2>&1
+    openssl pkeyutl -verify -pubin -inkey "$package/advisory-public-key.pem" -rawin \
+      -in "$package/advisory-payload.json" -sigfile "$package/advisory-signature.bin" >/dev/null
+  fi
+}
 "$python" - <<'PY'
 import json
 with open('deployment/zot/config.json', encoding='utf-8') as source:
@@ -332,6 +383,7 @@ PY
   [[ $version == *-* ]] && prerelease_query='?includePrerelease=true'
   curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/manifest$prerelease_query" >/dev/null
 done
+verify_advisory_feed
 old_main_ref="$registry/public/plugins/artio-reference@$main_digest_120"
 main_tag_120="$publisher_registry/staging/plugins/artio-reference:1.2.0"
 overwrite_tag="$publisher_registry/staging/plugins/artio-reference:acceptance-overwrite"
@@ -463,6 +515,7 @@ if [[ -n $release_id_129 ]]; then
     "$base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.9/manifest")
   [[ $revoked_status == 410 ]] || { echo 'Revoked release did not return HTTP 410.' >&2; exit 1; }
   [[ $(curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0" | "$python" -c 'import json,sys;print(json.load(sys.stdin)["version"])') == 1.3.0 ]] || { echo 'Revoking an older release affected the latest release.' >&2; exit 1; }
+  verify_advisory_feed 1.2.9
 fi
 echo 'Moderation, release-scoped revocation and catalog checks passed.'
 if ((${#tags[@]})); then docker image rm "${tags[@]}" >/dev/null 2>&1 || true; fi
@@ -601,5 +654,5 @@ retry_after=$(curl --silent --dump-header "$package/rate-limit.headers" --output
   exit 1
 }
 
-echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, old-digest retention after tag overwrite, digest-pinned main/sidecar artifacts, SemVer/Core/country/category/search filtering, separate approval roles, release-scoped revocation, localized catalog, manifest retrieval, a restricted plugin invocation smoke test, runtime availability during Marketplace outage, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
+echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, old-digest retention after tag overwrite, digest-pinned main/sidecar artifacts, SemVer/Core/country/category/search filtering, separate approval roles, signed advisory feed verification and exact-digest security revocation, localized catalog, manifest retrieval, a restricted plugin invocation smoke test, runtime availability during Marketplace outage, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
 if ((core_status != 0)); then exit "$core_status"; fi

@@ -33,8 +33,8 @@ jobs:
         run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
       - name: Lint OpenAPI 3.1 contract
         run: npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml
-      - name: Verify V1 to V5 migrations on disposable PostgreSQL
-        run: bash ./scripts/test-v3-migration.sh
+      - name: Verify the single current V1 schema on disposable PostgreSQL
+        run: bash ./scripts/test-current-schema.sh
       - name: Prepare isolated Docker acceptance credentials
         shell: bash
         run: |
@@ -45,6 +45,7 @@ jobs:
           revocation_token=$(openssl rand -hex 32)
           signing_token=$(openssl rand -hex 32)
           signing_key_id=ci-acceptance-2026
+          advisory_signing_key_id=ci-advisory-2026
           zot_password=$(openssl rand -hex 32)
           promoter_password=$(openssl rand -hex 32)
           postgres_password=$(openssl rand -hex 32)
@@ -62,6 +63,10 @@ jobs:
           openssl genpkey -algorithm Ed25519 -out secrets/release-signing-key.pem
           signing_public_key=$(openssl pkey -in secrets/release-signing-key.pem -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')
           chmod 600 secrets/release-signing-key.pem
+          openssl genpkey -algorithm Ed25519 -out secrets/advisory-signing-key.pem
+          advisory_private_key=$(openssl pkcs8 -topk8 -nocrypt -outform DER -in secrets/advisory-signing-key.pem | base64 -w0)
+          advisory_public_key=$(openssl pkey -in secrets/advisory-signing-key.pem -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')
+          chmod 600 secrets/advisory-signing-key.pem
           printf '%s\n' "$zot_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i publisher > secrets/zot.htpasswd
           printf '%s\n' "$promoter_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i promoter >> secrets/zot.htpasswd
           token_hash=$(printf '%s' "$publisher_token" | sha256sum | cut -d' ' -f1)
@@ -75,6 +80,8 @@ jobs:
           MARKETPLACE_REVOCATION_TOKEN_SHA256=$revocation_token_hash
           MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256=$signing_token_hash
           MARKETPLACE_SIGNING_TRUSTED_KEYS=$signing_key_id=$signing_public_key
+          MARKETPLACE_ADVISORY_SIGNING_KEY_ID=$advisory_signing_key_id
+          MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64=$advisory_private_key
           MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter
           MARKETPLACE_ZOT_PROMOTION_PASSWORD=$promoter_password
           MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE=200
@@ -89,6 +96,7 @@ jobs:
           echo "MARKETPLACE_SIGNING_INGEST_TOKEN_FILE=$(pwd)/secrets/signing-ingest-token.txt" >> "$GITHUB_ENV"
           echo "MARKETPLACE_SIGNING_PRIVATE_KEY_FILE=$(pwd)/secrets/release-signing-key.pem" >> "$GITHUB_ENV"
           echo "MARKETPLACE_SIGNING_KEY_ID=$signing_key_id" >> "$GITHUB_ENV"
+          echo "ARTIO_MARKETPLACE_ADVISORY_TRUSTED_KEYS=$advisory_signing_key_id=$advisory_public_key" >> "$GITHUB_ENV"
       - name: Enable local HTTP registry for the Docker acceptance fixture
         run: |
           echo '{"insecure-registries":["localhost:5000","localhost:5001"]}' | sudo tee /etc/docker/daemon.json

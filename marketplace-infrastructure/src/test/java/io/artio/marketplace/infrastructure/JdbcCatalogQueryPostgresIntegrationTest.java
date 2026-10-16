@@ -17,7 +17,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Exercises the real catalog adapter and V1-V3 schema on PostgreSQL 16. */
+/** Exercises the real catalog adapter and single current V1 schema on PostgreSQL 16. */
 @Testcontainers
 class JdbcCatalogQueryPostgresIntegrationTest {
   @Container

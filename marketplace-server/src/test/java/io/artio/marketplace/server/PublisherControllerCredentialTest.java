@@ -30,6 +30,7 @@ class PublisherControllerCredentialTest {
         null,
         null,
         mock(PlatformTransactionManager.class),
+        null,
         publisher,
         admin,
         revocation);

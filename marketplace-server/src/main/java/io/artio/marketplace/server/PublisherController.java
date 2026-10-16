@@ -38,6 +38,7 @@ public class PublisherController {
   private final ArtifactPromoter promoter;
   private final io.artio.marketplace.infrastructure.MediaStore media;
   private final org.springframework.transaction.support.TransactionTemplate transactions;
+  private final SecurityAdvisoryOperations advisories;
   private final String publisherTokenHash;
   private final String adminTokenHash;
   private final String revocationTokenHash;
@@ -50,6 +51,7 @@ public class PublisherController {
       ArtifactPromoter promoter,
       io.artio.marketplace.infrastructure.MediaStore media,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
+      SecurityAdvisoryOperations advisories,
       @Value("${marketplace.publisher.token-sha256:}") String publisherTokenHash,
       @Value("${marketplace.admin.token-sha256:}") String adminTokenHash,
       @Value("${marketplace.revocation.token-sha256:}") String revocationTokenHash) {
@@ -61,6 +63,7 @@ public class PublisherController {
     this.media = media;
     this.transactions =
         new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+    this.advisories = advisories;
     this.publisherTokenHash = publisherTokenHash;
     this.adminTokenHash = adminTokenHash;
     this.revocationTokenHash = revocationTokenHash;
@@ -579,6 +582,42 @@ public class PublisherController {
             : json(
                 mapper.valueToTree(
                     Map.of("category", request.category(), "reason", request.reason()))));
+    if ("UNLISTED".equals(to)) {
+      advisories.recordPublicationRemoval(
+          releaseId,
+          "REMOVED",
+          null,
+          "MARKETPLACE_UNLISTED",
+          "INFO",
+          Map.of(
+              "en",
+              "This release was removed from the official Marketplace.",
+              "de",
+              "Diese Version wurde aus dem offiziellen Marketplace entfernt.",
+              "fr",
+              "Cette version a été retirée de la Marketplace officielle.",
+              "it",
+              "Questa versione è stata rimossa dal Marketplace ufficiale."),
+          actor);
+    } else if (request != null) {
+      boolean securityBan = List.of("SECURITY", "MALWARE").contains(request.category());
+      advisories.recordPublicationRemoval(
+          releaseId,
+          "REMOVED",
+          securityBan ? "BANNED" : null,
+          "RELEASE_REVOKED_" + request.category(),
+          securityBan ? "CRITICAL" : "INFO",
+          Map.of(
+              "en",
+              request.reason(),
+              "de",
+              "Diese Version wurde wegen " + request.category() + " gesperrt.",
+              "fr",
+              "Cette version a été bloquée pour " + request.category() + ".",
+              "it",
+              "Questa versione è stata bloccata per " + request.category() + "."),
+          actor);
+    }
     return Map.of("releaseId", releaseId, "state", to);
   }
 

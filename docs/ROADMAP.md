@@ -11,8 +11,8 @@ This is the Marketplace-side progress ledger for the approved 2026-10-16 integra
 | Nested OCI index and platform preservation | PASS | The v2 main image was an OCI index with `linux/amd64` and `linux/arm64`. Zot preserved the index and child digests; Docker pulled both platforms. An infrastructure unit test verifies recursive index copying. |
 | No unapproved descriptor/catalog exposure and no public access to new unapproved artifacts | PASS within tested Zot boundary | Acceptance denied the new release manifest before finalization across both listeners and tested digest reuse without granting release install eligibility. Partially public bytes after approval remain the explicitly documented Zot static-ACL limitation. |
 | Signed immutable release descriptor and Core-side official provenance verification | PASS for the local trust path | Live Docker acceptance signed four releases, rejected unsigned descriptors, and verified Core's trusted-key, canonical manifest digest, route identity and exact OCI image inventory checks while importing the Marketplace manifest. Production signing-key rotation and recovery drill remains OPEN. |
-| Core durable installation saga, custom registry, and secured local OCI/Docker archive import | OPEN | Core remains authoritative for install/runtime. Do not route arbitrary client payloads through the official trust path. |
-| Signed support/removal/security advisory feed and local digest-level ban enforcement | OPEN | Core must enforce bans against every runtime path and already-running container while preserving business obligations. No remote Core control channel. |
+| Core durable installation saga, custom registry, and secured local OCI/Docker archive import | PARTIAL | Core now has persisted/idempotent installation-job APIs, leases, retries and cancellation for registered plugins. Custom registry credentials, quarantine-scoped local archives, and complete lifecycle integration remain open. Keep Core authoritative; do not route arbitrary client payloads through the official trust path. |
+| Signed support/removal/security advisory feed and local digest-level ban enforcement | MARKETPLACE FEED IMPLEMENTED; CORE ENFORCEMENT OPEN | The current Marketplace V1 schema stores append-only support/security events and serves a monotonic Ed25519-signed snapshot over `/api/v1/marketplace/security/advisories`. CI provisions an independent feed signing key; unit tests verify canonical signatures and fail-closed missing-key behavior. Core still must poll, independently verify/cache the snapshot, persist exact digest bans monotonically, block every runtime path, and contain already-running containers while preserving business obligations. No remote Core control channel. |
 | Per-instance v2 upgrade/rollback, status-aware Backoffice, and job diagnostics | OPEN | Keep source, support, security and lifecycle dimensions separate. |
 | Exact compatible Core pin and required cross-repository CI acceptance | PENDING | Core `8b72746d64560801c5b18d213845ff5e3a381fc2` is now published and pinned after its durable-installation-job foundation passed PostgreSQL/API acceptance. The prior exact-pin Marketplace CI passed on Core `bdd1b80d8f020eca05e3000b6435f18aa835d8bd`; this updated pin gate closes after the new run passes. |
 
@@ -27,10 +27,10 @@ This is the Marketplace-side progress ledger for the approved 2026-10-16 integra
 
 ## Next dependency order
 
-1. Finalize the shared canonical signed-release descriptor and signed-advisory contracts plus threat model.
+1. Finalize the signed-advisory contract and threat model; Marketplace snapshot publication is implemented, while cross-repository contract acceptance remains open.
 2. Implement an independent release signing authority and immutable Marketplace descriptor issuance only after every promoted artifact verifies.
 3. Verify signed official provenance in Core's server-side install path; preserve manual custom plugin registration as `CUSTOM`, never as official.
 4. Implement the durable Core installation service and isolated-controller job protocol; add private-registry and quarantined local archive channels.
-5. Implement signed advisory ingestion, exact artifact identity, ban containment and recovery semantics.
+5. Implement Core signed advisory ingestion, exact artifact identity, ban containment and recovery semantics against the Marketplace V1 snapshot.
 6. Complete v2 per-instance upgrade/rollback, Backoffice status/job UX, and fault-injected recovery acceptance.
 7. Pin and test the exact mutually compatible commits in fail-closed CI, then continue the remaining Master Plan in dependency order.

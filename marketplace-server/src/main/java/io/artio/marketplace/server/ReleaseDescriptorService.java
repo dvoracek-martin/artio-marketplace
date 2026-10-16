@@ -27,13 +27,16 @@ public final class ReleaseDescriptorService {
   private final JdbcTemplate jdbc;
   private final ObjectMapper mapper;
   private final Map<String, String> trustedKeys;
+  private final SecurityAdvisoryOperations advisoryOperations;
 
   public ReleaseDescriptorService(
       JdbcTemplate jdbc,
       ObjectMapper mapper,
+      SecurityAdvisoryOperations advisoryOperations,
       @Value("${marketplace.signing.trusted-keys:}") String trustedKeys) {
     this.jdbc = jdbc;
     this.mapper = mapper;
+    this.advisoryOperations = advisoryOperations;
     this.trustedKeys = parseTrustedKeys(trustedKeys);
   }
 
@@ -139,13 +142,14 @@ public final class ReleaseDescriptorService {
       if (!verifier.verify(signatureBytes))
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Release signature is invalid");
       String document = new String(canonicalExpected, StandardCharsets.UTF_8);
-      jdbc.update(
-          "INSERT INTO release_signatures(release_id,key_id,descriptor_sha256,descriptor_document,signature_base64url) VALUES (?::uuid,?,?,?,?) ON CONFLICT(release_id,key_id) DO NOTHING",
-          releaseId,
-          keyId,
-          sha(canonicalExpected),
-          document,
-          encodedSignature);
+      int inserted =
+          jdbc.update(
+              "INSERT INTO release_signatures(release_id,key_id,descriptor_sha256,descriptor_document,signature_base64url) VALUES (?::uuid,?,?,?,?) ON CONFLICT(release_id,key_id) DO NOTHING",
+              releaseId,
+              keyId,
+              sha(canonicalExpected),
+              document,
+              encodedSignature);
       var stored =
           jdbc.queryForObject(
               "SELECT descriptor_sha256 FROM release_signatures WHERE release_id=?::uuid AND key_id=?",
@@ -155,6 +159,7 @@ public final class ReleaseDescriptorService {
       if (!sha(canonicalExpected).equals(stored))
         throw new ResponseStatusException(
             HttpStatus.CONFLICT, "A different immutable signature already exists for this key");
+      if (inserted == 1) advisoryOperations.touchFeed();
     } catch (ResponseStatusException failure) {
       throw failure;
     } catch (Exception failure) {

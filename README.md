@@ -7,14 +7,14 @@ Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and disc
 - Public catalog, search, plugin and release details, media delivery, compatible release selection, and publisher listing controls.
 - Two-person manual release workflow for digest-pinned OCI images, localized metadata, screenshots, icon, and release notes.
 - Publisher images enter private `staging/**`; after independent approval, Marketplace automatically promotes the complete main/sidecar OCI bundle to `public/**` and only then exposes the release in the catalog.
-- PostgreSQL migrations and immutable release records; OCI registry and uploaded media are persisted separately.
+- One current PostgreSQL V1 schema snapshot and immutable release records; development does not maintain incremental schema migrations. OCI registry and uploaded media are persisted separately.
 - Official releases expose a signed immutable descriptor only after complete Zot promotion and an independent Ed25519 signing workflow; custom manifest registration remains a separate Core path.
 - Combined Marketplace + Zot container and PostgreSQL Compose deployment.
 - Backoffice UI, payments, and licensing are intentionally out of scope.
 
 See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATIBILITY.md), the [acceptance evidence](docs/ACCEPTANCE.md), [OpenAPI](marketplace-contract/openapi.yaml), and the [publishing guide](docs/PUBLISHING.md).
 
-Private staging and digest-preserving OCI promotion are verified against the pinned Zot registry, including a multi-platform index. Cryptographically signed release descriptors and Core-side official-provenance verification, signed security advisories, and custom local archive installation are still open; two-person review and digest checks alone do not establish artifact provenance. See the [integration security roadmap](docs/ROADMAP.md) before treating a published plugin as officially verified.
+Private staging and digest-preserving OCI promotion are verified against the pinned Zot registry, including a multi-platform index. Marketplace issues signed immutable release descriptors and a signed security/support advisory feed, and Core verifies official release descriptors. Image provenance beyond the descriptor signature, Core advisory polling and local ban enforcement, and custom local archive installation remain open. A signed descriptor does not by itself prove image build provenance. See the [integration security roadmap](docs/ROADMAP.md) before treating a published plugin as fully verified.
 
 ## Run the whole Marketplace with Docker
 

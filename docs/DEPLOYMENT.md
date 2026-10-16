@@ -12,7 +12,7 @@ For an external HTTPS ingress, see [the example Nginx routes](../deployment/reve
 
 See [.env.example](../.env.example) and [README](../README.md#run-locally-with-docker) for local setup. Production should use an orchestrator secret store rather than a checked-in or broadly readable `.env`; provide equivalent environment variables and mount the Zot htpasswd secret read-only. Database credentials, publisher/admin/revocation token hashes, and Zot password are distinct. Store each raw API token separately from `.env`; only its SHA-256 hash belongs in the environment.
 
-Start with `docker compose --env-file .env -f deployment/compose.yaml up --build -d`. Inspect with `docker compose --env-file .env -f deployment/compose.yaml ps` and readiness at `/actuator/health/readiness`. Flyway applies versioned schema migrations at startup.
+Start with `docker compose --env-file .env -f deployment/compose.yaml up --build -d`. Inspect with `docker compose --env-file .env -f deployment/compose.yaml ps` and readiness at `/actuator/health/readiness`. Flyway applies the single current V1 schema snapshot at startup. During development, update that snapshot in place; there is no incremental schema upgrade path before production. When a schema change makes an existing disposable development database incompatible, recreate only that development database using the project's documented reset procedure. Production migration history will be introduced with the first production release.
 
 ## Production checklist
 
