@@ -32,6 +32,10 @@ wait_for() {
 }
 
 echo "Capturing a consistent point-in-time set for Compose project $project."
+# The preceding acceptance intentionally exhausts the public API rate limit.
+# Restart this disposable API process so the recovery probe starts in a clean
+# rate-limit window; PostgreSQL, Zot and media volumes remain untouched.
+"${compose[@]}" restart marketplace >/dev/null
 wait_for
 manifest_url="$api_base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.0/manifest"
 before_manifest=$(curl --fail --silent --show-error "$manifest_url")
