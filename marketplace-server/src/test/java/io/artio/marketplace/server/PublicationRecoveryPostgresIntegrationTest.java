@@ -17,7 +17,6 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,10 +42,12 @@ class PublicationRecoveryPostgresIntegrationTest {
   private static final String ADMIN_TOKEN = "publication-test-admin";
   private static final String RELEASE_ID = "10000000-0000-0000-0000-000000000001";
   private static final String PLUGIN_ID = "recovery.test";
-  private static final String MANIFEST = """
+  private static final String MANIFEST =
+      """
       {"id":"recovery.test","name":"Recovery test","version":"1.0.0","vendor":"Artio","minimumCoreVersion":"1.0.0","maximumCoreVersion":"2.0.0","image":"localhost:5000/public/plugins/recovery@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","extensionPoints":["catalog.products.read.v1"],"configuration":{},"dependencies":[],"geographicAvailability":{"scope":"GLOBAL","countries":[]}}
       """;
-  private static final String CATALOG = """
+  private static final String CATALOG =
+      """
       {"slug":"recovery-test","title":{"en":"Recovery test"},"tagline":{"en":"Test"},"description":{"en":"Test release"},"categories":["other"],"icon":"recovery-icon","screenshots":[],"releaseNotes":{"en":"Initial release"}}
       """;
 
@@ -89,10 +90,11 @@ class PublicationRecoveryPostgresIntegrationTest {
         manifestDigest,
         CATALOG,
         sha(MANIFEST + "\n" + CATALOG));
-    String catalogDigest = jdbc.queryForObject(
-        "SELECT metadata::text FROM marketplace_releases WHERE release_id=?::uuid",
-        String.class,
-        RELEASE_ID);
+    String catalogDigest =
+        jdbc.queryForObject(
+            "SELECT metadata::text FROM marketplace_releases WHERE release_id=?::uuid",
+            String.class,
+            RELEASE_ID);
     catalogDigest = sha(catalogDigest);
     jdbc.update(
         "UPDATE marketplace_releases SET publication_approval_state='APPROVED',publication_approved_by='admin',publication_approved_at=now(),approved_manifest_sha256=?,approved_catalog_sha256=? WHERE release_id=?::uuid",
@@ -102,7 +104,9 @@ class PublicationRecoveryPostgresIntegrationTest {
 
     var rules = mock(ManifestRules.class);
     when(rules.registryHost()).thenReturn("localhost:5000");
-    when(rules.validate(org.mockito.ArgumentMatchers.any(JsonNode.class), org.mockito.ArgumentMatchers.any(JsonNode.class)))
+    when(rules.validate(
+            org.mockito.ArgumentMatchers.any(JsonNode.class),
+            org.mockito.ArgumentMatchers.any(JsonNode.class)))
         .thenReturn(new ManifestRules.Validation(null, List.of()));
     var artifacts = mock(ArtifactVerifier.class);
     when(artifacts.verify(anyString(), anyString())).thenReturn(List.of());
@@ -127,7 +131,8 @@ class PublicationRecoveryPostgresIntegrationTest {
   void partialCopyFailureLeavesRetryableJobAndRetryPublishesTheSameApprovedRelease() {
     doAnswer(
             invocation -> {
-              throw new IllegalStateException("simulated process interruption after partial OCI copy");
+              throw new IllegalStateException(
+                  "simulated process interruption after partial OCI copy");
             })
         .doNothing()
         .when(promoter)
@@ -177,8 +182,11 @@ class PublicationRecoveryPostgresIntegrationTest {
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("Release changed while publishing; retry");
     assertRelease("VALIDATED", "RETRYABLE", "PROMOTION_INCOMPLETE", 1);
-    assertThat(jdbc.queryForObject(
-        "SELECT moderation_state FROM marketplace_plugins WHERE plugin_id=?", String.class, PLUGIN_ID))
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT moderation_state FROM marketplace_plugins WHERE plugin_id=?",
+                String.class,
+                PLUGIN_ID))
         .isEqualTo("SUSPENDED");
 
     jdbc.update(
@@ -189,21 +197,26 @@ class PublicationRecoveryPostgresIntegrationTest {
     assertRelease("PUBLISHED", "PUBLISHED", null, 2);
   }
 
-  private void assertRelease(String releaseState, String promotionState, String error, int attempts) {
-    assertThat(jdbc.queryForObject(
-        "SELECT publication_state FROM marketplace_releases WHERE release_id=?::uuid",
-        String.class,
-        RELEASE_ID)).isEqualTo(releaseState);
-    var promotion = jdbc.queryForMap(
-        "SELECT state,last_error_code,attempt_count FROM publication_promotions WHERE release_id=?::uuid",
-        RELEASE_ID);
+  private void assertRelease(
+      String releaseState, String promotionState, String error, int attempts) {
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT publication_state FROM marketplace_releases WHERE release_id=?::uuid",
+                String.class,
+                RELEASE_ID))
+        .isEqualTo(releaseState);
+    var promotion =
+        jdbc.queryForMap(
+            "SELECT state,last_error_code,attempt_count FROM publication_promotions WHERE release_id=?::uuid",
+            RELEASE_ID);
     assertThat(promotion.get("state")).isEqualTo(promotionState);
     assertThat(promotion.get("last_error_code")).isEqualTo(error);
     assertThat(promotion.get("attempt_count")).isEqualTo(attempts);
   }
 
   private static String sha(String value) throws Exception {
-    return HexFormat.of().formatHex(
-        MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+    return HexFormat.of()
+        .formatHex(
+            MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
   }
 }
