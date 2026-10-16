@@ -1,5 +1,6 @@
 .env
 .env.*.local
+.local-marketplace/
 secrets/
 **/build/
 .gradle/
