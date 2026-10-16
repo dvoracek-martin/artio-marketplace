@@ -12,6 +12,7 @@ artifact_refs=()
 release_refs=()
 release_id_120=""
 release_id_129=""
+main_digest_120=""
 smoke_container=""
 proxy_container=""
 had_python_base=false
@@ -178,6 +179,7 @@ PY
     ./scripts/publish-staged-release.sh "$staged_release_id" "$base" >/dev/null
   if [[ $version == 1.2.0 ]]; then release_id_120=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
   if [[ $version == 1.2.9 ]]; then release_id_129=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
+  if [[ $version == 1.2.0 ]]; then main_digest_120=$main_digest; fi
 
   docker pull "$main_ref" >/dev/null
   docker pull "$sidecar_ref" >/dev/null
@@ -185,6 +187,20 @@ PY
   [[ $version == *-* ]] && prerelease_query='?includePrerelease=true'
   curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/manifest$prerelease_query" >/dev/null
 done
+old_main_ref="$registry/public/plugins/artio-reference@$main_digest_120"
+main_tag_120="$publisher_registry/public/plugins/artio-reference:1.2.0"
+docker tag "$publisher_registry/public/plugins/artio-reference:1.3.0" "$main_tag_120"
+docker push "$main_tag_120" >/dev/null
+overwritten_digest=$(resolve_digest public/plugins/artio-reference 1.2.0)
+[[ $overwritten_digest =~ ^sha256:[a-f0-9]{64}$ && $overwritten_digest != "$main_digest_120" ]] || {
+  echo 'Overwriting a Zot tag did not produce a new manifest digest.' >&2
+  exit 1
+}
+curl --fail --silent --show-error --head --header "Accept: $accept" \
+  "http://$registry/v2/public/plugins/artio-reference/manifests/$main_digest_120" >/dev/null
+docker image rm "$old_main_ref" >/dev/null
+docker pull "$old_main_ref" >/dev/null
+echo 'Zot retained the previous manifest and image after its mutable tag was overwritten.'
 echo 'OCI pushes and release publication loop completed.'
 
 docker logout "$publisher_registry" >/dev/null 2>&1 || true
@@ -209,6 +225,13 @@ compatible = get('/api/v1/marketplace/plugins/marketplace.reference/releases?cor
 assert [r['version'] for r in compatible['content']] == ['1.3.0', '1.2.0']
 assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0')['version'] == '1.3.0'
 assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0&includePrerelease=true')['version'] == '1.4.0-rc.1'
+filtered = get('/api/v1/marketplace/plugins?category=other&country=CH&coreVersion=1.0.0&size=1')
+assert filtered['totalElements'] == 1 and filtered['content'][0]['version'] == '1.3.0'
+assert get('/api/v1/marketplace/plugins?category=payments')['totalElements'] == 0
+searched = get('/api/v1/marketplace/plugins?q=marketplace.reference&category=other&size=1')
+assert searched['totalElements'] == 1 and searched['content'][0]['pluginId'] == 'marketplace.reference'
+preview_card = get('/api/v1/marketplace/plugins?category=other&coreVersion=1.0.0&includePrerelease=true&size=1')
+assert preview_card['content'][0]['version'] == '1.4.0-rc.1'
 PY
 echo 'SemVer release selection checks passed.'
 revocation_token=$(cat "$MARKETPLACE_REVOCATION_TOKEN_FILE")
@@ -416,5 +439,5 @@ retry_after=$(curl --silent --dump-header "$package/rate-limit.headers" --output
   exit 1
 }
 
-echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, digest-pinned main/sidecar artifacts, SemVer and compatibility filtering, separate operator roles, release-scoped revocation, localized catalog, manifest retrieval, a restricted real plugin health/authenticated invocation/idempotency smoke test, runtime availability while Marketplace is stopped, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
+echo 'Docker acceptance passed: anonymous pulls and denied writes, authenticated OCI pushes, old-digest retention after tag overwrite, digest-pinned main/sidecar artifacts, SemVer/Core/country/category/search filtering, separate approval roles, release-scoped revocation, localized catalog, manifest retrieval, a restricted plugin invocation smoke test, runtime availability during Marketplace outage, and bounded public API rate limiting. Test-local containers, images and files are removed by the exit trap.'
 if ((core_status != 0)); then exit "$core_status"; fi

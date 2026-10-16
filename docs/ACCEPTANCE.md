@@ -32,6 +32,9 @@ The exact combined local `spotlessCheck clean build jacocoTestReport :marketplac
 | Offline-after-install | PARTIAL | CI stopped the Marketplace service while the independently running reference extension remained healthy and returned the same authenticated invocation result. A full Core Plugin Manager offline install/update failure-diagnostic path was not run. |
 | Backup/restore drill | PASS | CI run 38827486941 backed up PostgreSQL, Zot and media after a controlled Marketplace restart; destroyed only its unique acceptance project's volumes; restored fresh volumes; confirmed the published manifest was byte-for-byte identical and pulled its image by digest. |
 | Full Core Admin Plugin Manager install/register/enable/uninstall using the exact published manifest | NOT RUN | The isolated pinned Core runtime and catalog tests cover real Docker lifecycle and catalog policy, but the full admin-controller flow did not pass. No deployed customer Core is assumed or contacted. |
+| Marketplace manifest through Core validate → register → install with local Zot | NOT RUN | Requires a clean isolated Core harness, Core trusted registry `localhost:5000`, and Docker Engine `insecure-registries` for the local HTTP registry. Runtime/controller unit/integration coverage does not establish this full route. |
+| PostgreSQL catalog ordering/filter reproduction | OPEN | The owner reports a confirmed PostgreSQL ordering/filter defect that can affect Core's selected version. Existing CI only verifies a narrow SemVer/Core-version fixture; the specific failing query/data case is not represented, so the prior PASS does not close this finding. |
+| Local Zot tag-overwrite digest retention | NOT VERIFIED | GC is disabled and restore drills pull a digest, but the current acceptance did not overwrite a tag and then pull its former manifest by digest. A new regression scenario is being added; it is not PASS until hosted Docker acceptance completes. |
 | Local Windows end-to-end Docker acceptance | NOT RUN for the latest outage/restore script | Previous local OCI acceptance evidence predates the added outage scenario; the current live acceptance is run in isolated GitHub CI. |
 | Scaling to thousands of independent Core installations | NOT RUN | Architecture has no per-customer Core connections or Docker socket, but no representative load profile or throughput test has been performed. |
 
@@ -79,6 +82,12 @@ The predecessor run used `continue-on-error`, which is documented above as a his
 ## Compatibility boundary
 
 Marketplace returns the original Core `PluginManifest v1` document and does not implement a second plugin runtime. Core remains authoritative for a customer's actual Core version, trusted registry configuration, installed dependencies, configuration, installation state, and lifecycle. CI checks out the public Core repository at the pinned SHA in a separate workspace; no customer Core instance is required. See [Core compatibility](CORE_COMPATIBILITY.md) for the pinned contract and documented manifest/template conflict.
+
+## Development blockers versus production risks
+
+Development verification is blocked on the full Core `validate → register → install` path against the exact Marketplace manifest, the PostgreSQL catalog ordering/filter defect reported by the owner, and the OpenSearch template conflict if that plugin is needed. A local HTTP Core run must trust `localhost:5000`, and the Docker daemon must allow that local registry as insecure; the test environment cannot assume a live Core is already running. The OpenSearch conflict is in the pinned Core validator and cannot be repaired in this repository without breaking compatibility.
+
+Single-token supply-chain compromise, remote revocation of installed customer extensions, rate limiting behind a public proxy, public management/metrics exposure, and untrusted manifest markup are production security concerns. The Marketplace-only changes mitigate publisher-token compromise with independent approval and address the existing proxy/Actuator/input findings, but do not deliver image signatures or Core-side revocation enforcement. See [Security](SECURITY.md) and [post-implementation hardening](POST_IMPLEMENTATION_HARDENING.md).
 
 ## Docker cleanup
 

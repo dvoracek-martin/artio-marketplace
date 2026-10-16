@@ -37,6 +37,12 @@ There is a concrete validator conflict in the pinned Core sources: `opensearch-s
 
 The full admin API install/configure/enable flow with the exact retrieved Marketplace manifest is not yet tested. It needs a separate isolated Core harness with its setup/security and Docker runtime configuration; no deployed or customer Core is assumed. A Marketplace outage smoke can independently verify that an already-running reference plugin still serves health/invocation, but it cannot substitute for the Core-side offline lifecycle assertion. Core must continue to run its normal version, registry-trust, dependency, configuration and lifecycle checks for every customer installation.
 
+### Local Core development prerequisites
+
+Core's `ARTIO_EXTENSION_TRUSTED_REGISTRIES` defaults to empty. For a host-run development Core consuming the local Marketplace registry, configure `ARTIO_EXTENSION_TRUSTED_REGISTRIES=localhost:5000` (or the exact public registry host in the returned manifest). Because the local Compose profile uses plain HTTP, Docker Engine must also have that host in its `insecure-registries` configuration and be restarted. Do not use this HTTP exception for a remotely reachable deployment. If Core runs inside a container or VM, `localhost` refers to that network namespace; use the host's reachable registry name consistently in Core trust settings, image references, and the Marketplace allowlist.
+
+The missing development smoke is: obtain the exact manifest from Marketplace, call Core's `/api/v1/admin/extensions/validate`, register it, then call install and verify the Docker runtime pulls the digest from the trusted local Zot. This sequence has **not** been run against a live Core. CI's pinned runtime/controller/catalog tests are narrower and do not substitute for it. The Core checkout at `D:\Development\Projects\Artio` was already dirty during this review and must not be used as a disposable test target; use a clean isolated checkout or user-provided Core test environment.
+
 ## Drift gate
 
 CI checks out the Core repository at the exact pin and byte-compares the three copied sources to this module. It builds isolated runtime/controller fixtures from that checkout; there is no standing Core process or Marketplace-to-Core client connection. Updating the Core contract requires an explicit pin change, copied-source review, fixture update and contract test update. Marketplace does not depend on the whole Core build or Spring application.
