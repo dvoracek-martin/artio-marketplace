@@ -105,7 +105,31 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
   mkdir -p "$release_dir/media"
   maximum_core=9.9.9
   [[ $version == 1.2.9 ]] && maximum_core=0.5.0
-  cat >"$release_dir/manifest.json" <<JSON
+  if [[ $version == 1.3.0 ]]; then
+    cat >"$release_dir/manifest.json" <<JSON
+{
+  "packageManifest": {
+    "manifestVersion":"2",
+    "id":"marketplace.reference",
+    "name":"Artio Reference Extension",
+    "vendor":"Artio Marketplace",
+    "version":"$version",
+    "description":"Runnable v2 reference extension for validating Marketplace distribution with the Artio Core runtime.",
+    "minimumCoreVersion":"0.1.0",
+    "maximumCoreVersion":"$maximum_core",
+    "image":"$main_ref",
+    "dependencies":[],"permissions":[],"configuration":{},"extensionPoints":[],
+    "healthPath":"/health","diagnosticsPath":"/diagnostics",
+    "geographicAvailability":{"scope":"GLOBAL","countries":[]},
+    "services":[{"id":"companion","image":"$sidecar_ref","port":8080,"healthPath":"/health","dependsOn":["main"]}],
+    "persistentPaths":["/var/lib/artio-reference"]
+  },
+  "capabilities":[{"capabilityId":"payment.provider.v1","operations":["createCheckout"],"permissions":["payment.process"],"accountFingerprints":{}}],
+  "subscriptions":[{"eventType":"order.paid","schemaVersion":1,"permissions":[]}]
+}
+JSON
+  else
+    cat >"$release_dir/manifest.json" <<JSON
 {
   "manifestVersion":"1",
   "id":"marketplace.reference",
@@ -123,6 +147,7 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
   "persistentPaths":["/var/lib/artio-reference"]
 }
 JSON
+  fi
   cat >"$release_dir/catalog.json" <<JSON
 {
   "schemaVersion":1,"pluginId":"marketplace.reference","slug":"artio-reference-extension",
@@ -287,7 +312,8 @@ status, source = request('/api/v1/admin/marketplace/releases/' + source_id)
 assert status == 200
 manifest = source['manifest']
 catalog = source['catalog']
-manifest['version'] = '9.0.0'
+runtime_manifest = manifest.get('packageManifest', manifest)
+runtime_manifest['version'] = '9.0.0'
 catalog['releaseNotes']['en'] = 'Suspended publication rejection check.'
 status, created = request('/api/v1/admin/marketplace/releases', 'POST',
                           {'manifest': manifest, 'catalog': catalog}, 'suspended-publish-9.0.0')
@@ -413,11 +439,16 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   core_path=$(cd "$ARTIO_CORE_PATH" && pwd)
   export ARTIO_TEST_EXTENSION_IMAGE_V1=${release_refs[0]}
   export ARTIO_TEST_EXTENSION_IMAGE_V2=${release_refs[1]}
+  export ARTIO_MARKETPLACE_BASE_URL=${ARTIO_MARKETPLACE_BASE_URL:-$base}
+  export ARTIO_MARKETPLACE_TEST_PLUGIN_ID=marketplace.reference
+  export ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION=1.3.0
+  export ARTIO_EXTENSION_TRUSTED_REGISTRIES=${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-$registry}
   if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.extensions.PackagedExtensionControllerIntegrationTests \
-    --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls); then
-    echo 'Pinned Core Docker runtime, packaged controller and catalog integration checks passed with Marketplace-published image digests.'
+    --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls \
+    --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured); then
+    echo 'Core Docker runtime, packaged controller, Marketplace v2 import and catalog integration checks passed with Marketplace-published image digests.'
   else
     core_status=$?
     echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
