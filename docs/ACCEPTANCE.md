@@ -49,6 +49,19 @@ Hardening commit `e9bca63db6fa5653e1909bec8135739d907d0ba8` was pushed to `main`
 
 The hosted runs confirm that the CI gate now reports the pinned Core failure instead of suppressing it, even though the Marketplace Docker acceptance itself passes. The Core controller flow remains unverified as passing and needs a separately scoped Core fix. The Marketplace changes are pushed, but this workflow is red and the release gate is not green.
 
+## Two-party publication approval run
+
+Commit `3dccd9ffd828e4bab55e68bf86a62ec354919660` added a separate admin approval step bound to the staged manifest and catalog digests. GitHub Actions run [38869591460](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38869591460) completed with **failure** at the pinned Core compatibility test, while the Marketplace gates behaved as follows:
+
+- Java 25 compile, formatting, unit/architecture tests and coverage: **PASS**.
+- OpenAPI lint and V1–V3 PostgreSQL migration test: **PASS**.
+- Fail-closed acceptance self-check and Marketplace/PostgreSQL/Zot startup: **PASS**.
+- Docker acceptance, including publisher/admin role separation, unapproved publish rejection, approval invalidation after catalog edits, re-approval, OCI publication and digest pulls: **PASS**, final output `Docker acceptance passed`.
+- Pinned Core compatibility: **FAIL**, solely at `PackagedExtensionControllerIntegrationTests.packagedControllerAuthenticatesAndManagesPrivateBundleWithoutCommerceServices`, Core line 146 (`NullPointerException`). Core was not changed.
+- Isolated backup/restore drill, SPDX SBOM generation, Trivy HIGH/CRITICAL scan and `docker compose down -v` cleanup: **PASS**. Verified build/SBOM artifact upload was **SKIPPED** because the required gate was red.
+
+The latest Marketplace Docker acceptance therefore verifies the two-party publication behavior, but the full workflow is not green and this source is not fully release-ready while the pinned Core test fails. The two-party human approval boundary does not replace cryptographic image signing/provenance. See [post-implementation hardening](POST_IMPLEMENTATION_HARDENING.md) for the remaining A1/A2 and other risks.
+
 ## GitHub Actions run contents
 
 The successful predecessor run 38827486941 reported:
