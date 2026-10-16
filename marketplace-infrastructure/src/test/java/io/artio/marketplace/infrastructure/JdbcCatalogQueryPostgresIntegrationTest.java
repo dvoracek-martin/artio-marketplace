@@ -83,6 +83,34 @@ class JdbcCatalogQueryPostgresIntegrationTest {
         "publishing a release must not reactivate plugin moderation");
   }
 
+  @Test
+  void catalogAppliesV2NestedCoreAndGeographicCompatibility() {
+    plugin("com.ex.v2", "v2");
+    String packageManifest =
+        """
+        {"manifestVersion":"2","id":"com.ex.v2","name":"v2","vendor":"test","version":"1.0.0","description":"v2 fixture","minimumCoreVersion":"1.4.0","maximumCoreVersion":"2.0.0","image":"localhost:5000/public/plugins/v2@sha256:%s","healthPath":"/health","diagnosticsPath":"/diagnostics","geographicAvailability":{"scope":"COUNTRY_SPECIFIC","countries":["CH"]},"dependencies":[{"pluginId":"com.ex.dep","minimumVersion":"1.0.0"}]}
+        """
+            .formatted("a".repeat(64));
+    String manifest =
+        """
+        {"packageManifest":%s,"capabilities":[],"subscriptions":[]}
+        """
+            .formatted(packageManifest);
+    release("com.ex.v2", "1.0.0", "1.0.0", "9.9.9", "2026-01-01T00:00:00Z", "PUBLISHED", manifest);
+
+    var swiss = catalog.plugins("com.ex.v2", null, "CH", "1.5.0", false, "en", 0, 20);
+    assertEquals(1, swiss.totalElements());
+    var compatibility = (java.util.Map<?, ?>) swiss.content().getFirst().get("compatibility");
+    assertEquals("1.4.0", compatibility.get("minimumCoreVersion"));
+    assertEquals("2.0.0", compatibility.get("maximumCoreVersion"));
+    assertEquals(1, ((List<?>) compatibility.get("requiredDependencies")).size());
+
+    assertEquals(
+        0, catalog.plugins("com.ex.v2", null, "US", "1.5.0", false, "en", 0, 20).totalElements());
+    assertEquals(
+        0, catalog.plugins("com.ex.v2", null, "CH", "2.1.0", false, "en", 0, 20).totalElements());
+  }
+
   private String cardVersion(
       io.artio.marketplace.application.CatalogQuery.Page page, String pluginId) {
     return page.content().stream()
@@ -104,16 +132,29 @@ class JdbcCatalogQueryPostgresIntegrationTest {
       String maximumCore,
       String publishedAt,
       String state) {
+    release(pluginId, version, minimumCore, maximumCore, publishedAt, state, null);
+  }
+
+  private void release(
+      String pluginId,
+      String version,
+      String minimumCore,
+      String maximumCore,
+      String publishedAt,
+      String state,
+      String suppliedManifest) {
     String manifest =
-        "{\"schemaVersion\":1,\"pluginId\":\""
-            + pluginId
-            + "\",\"version\":\""
-            + version
-            + "\",\"minimumCoreVersion\":\""
-            + minimumCore
-            + "\",\"maximumCoreVersion\":\""
-            + maximumCore
-            + "\",\"geographicAvailability\":{\"scope\":\"GLOBAL\"},\"dependencies\":[]}";
+        suppliedManifest == null
+            ? "{\"schemaVersion\":1,\"pluginId\":\""
+                + pluginId
+                + "\",\"version\":\""
+                + version
+                + "\",\"minimumCoreVersion\":\""
+                + minimumCore
+                + "\",\"maximumCoreVersion\":\""
+                + maximumCore
+                + "\",\"geographicAvailability\":{\"scope\":\"GLOBAL\"},\"dependencies\":[]}"
+            : suppliedManifest;
     String metadata =
         "{\"schemaVersion\":1,\"categories\":[\"other\"],\"title\":{\"en\":\""
             + pluginId

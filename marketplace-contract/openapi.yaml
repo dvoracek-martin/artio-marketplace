@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Artio Marketplace API
   version: 1.0.0
-  description: Public plugin catalog and trusted publisher API. Runtime manifests use the Artio Core PluginManifest v1 contract.
+  description: Public plugin catalog and trusted publisher API. Runtime manifests preserve Artio Core PluginManifest v1 and add the backward-compatible capability envelope v2 contract.
   license: {name: Proprietary, identifier: LicenseRef-Artio-Marketplace-Proprietary}
 servers:
   - url: https://marketplace.example.invalid
@@ -66,7 +66,7 @@ paths:
       summary: Get the original Artio Core manifest
       parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}, {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}, {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}, {name: includePrerelease, in: query, schema: {type: boolean, default: false}}]
       responses:
-        '200': {description: Original Core PluginManifest v1 JSON, content: {application/json: {schema: {type: object}}}}
+        '200': {description: Original Core PluginManifest v1 JSON or capability-envelope v2 JSON, content: {application/json: {schema: {oneOf: [{type: object, description: Exact Core PluginManifest v1 document}, {$ref: './plugin-manifest-v2.schema.json'}]}}}}
         '404': {$ref: '#/components/responses/Error'}
   /api/v1/marketplace/plugins/{pluginId}/latest-compatible:
     get:
@@ -298,5 +298,5 @@ components:
       additionalProperties: false
       required: [manifest, catalog]
       properties:
-        manifest: {type: object, description: Exact Core PluginManifest v1 document}
+        manifest: {type: object, description: Exact Core PluginManifest v1 document or the Core capability-envelope v2 document; see plugin-manifest-v2.schema.json}
         catalog: {type: object, description: CatalogMetadataV1, additionalProperties: false}

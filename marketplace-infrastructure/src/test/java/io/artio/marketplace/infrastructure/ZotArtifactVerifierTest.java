@@ -73,6 +73,19 @@ class ZotArtifactVerifierTest {
   }
 
   @Test
+  void verifiesArtifactsNestedInV2PackageManifest() throws Exception {
+    var manifest =
+        new ObjectMapper()
+            .readTree(
+                """
+                    {"manifestVersion":"2","packageManifest":{"manifestVersion":"1","image":"%s","services":[{"image":"%s"}]},"capabilities":[],"subscriptions":[]}
+                    """
+                    .formatted(imageReference, imageReference));
+
+    assertTrue(verifier.verify("localhost:5000", manifest.toString()).isEmpty());
+  }
+
+  @Test
   void rejectsTagOnlyUnknownHostAndUnapprovedRepositoryBeforeNetworkAccess() throws Exception {
     var mapper = new ObjectMapper();
     var tagOnly = mapper.readTree("{\"image\":\"localhost:5000/public/plugins/example:1.0.0\"}");

@@ -66,8 +66,10 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
     List<String> errors = new ArrayList<>();
     try {
       JsonNode root = mapper.readTree(manifestJson);
-      check(root.path("image").asText(null), registryHost, "image", errors);
-      JsonNode services = root.path("services");
+      JsonNode packageManifest =
+          root.path("packageManifest").isObject() ? root.path("packageManifest") : root;
+      check(packageManifest.path("image").asText(null), registryHost, "image", errors);
+      JsonNode services = packageManifest.path("services");
       if (services.isArray())
         for (int i = 0; i < services.size(); i++)
           check(

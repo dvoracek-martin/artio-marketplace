@@ -12,8 +12,9 @@ root, base, token_file, dry = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Pa
 token = token_file.read_text(encoding='utf-8').strip()
 if len(token) < 32: raise SystemExit('Publisher token must contain at least 32 characters')
 manifest = json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+runtime_manifest = manifest.get('packageManifest', manifest)
 catalog = json.loads((root/'catalog.json').read_text(encoding='utf-8'))
-images = [manifest['image']] + [s['image'] for s in manifest.get('services', [])]
+images = [runtime_manifest['image']] + [s['image'] for s in runtime_manifest.get('services', [])]
 for image in images:
     if not re.fullmatch(r'[a-zA-Z0-9.-]+(?::[0-9]{1,5})?/[a-zA-Z0-9._/-]+@sha256:[a-f0-9]{64}', image): raise SystemExit(f'Invalid digest reference: {image}')
 icon = root/catalog['icon']; shots = [root/s['file'] for s in catalog.get('screenshots', [])]
@@ -34,9 +35,9 @@ payload={'manifest':manifest,'catalog':catalog}
 validation=request('/api/v1/admin/marketplace/releases/validate','POST',payload)
 if not validation.get('valid'): raise SystemExit('Validation failed: '+'; '.join(validation.get('errors',[])))
 if dry: print('Validation passed; dry run did not publish.');sys.exit(0)
-mhash=hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest();key=f"publish-{manifest['id']}-{manifest['version']}-{mhash}"
+mhash=hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest();key=f"publish-{runtime_manifest['id']}-{runtime_manifest['version']}-{mhash}"
 draft=request('/api/v1/admin/marketplace/releases','POST',payload,{'Idempotency-Key':key}); rid=draft['releaseId']
-if draft.get('state') == 'PUBLISHED': print(f"Already published {manifest['id']} {manifest['version']} (idempotent retry).\nreleaseId={rid}");sys.exit(0)
+if draft.get('state') == 'PUBLISHED': print(f"Already published {runtime_manifest['id']} {runtime_manifest['version']} (idempotent retry).\nreleaseId={rid}");sys.exit(0)
 def upload(path, kind):
     boundary='----artio'+uuid.uuid4().hex
     body=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode()+path.read_bytes()+f'\r\n--{boundary}--\r\n'.encode()
@@ -44,7 +45,7 @@ def upload(path, kind):
 catalog['icon']=upload(icon,'icon')
 for i,path in enumerate(shots):catalog['screenshots'][i]['assetId']=upload(path,'screenshot')
 request(f'/api/v1/admin/marketplace/releases/{rid}/catalog','PUT',catalog)
-print(f"Staged {manifest['id']} {manifest['version']} for separate admin review.")
+print(f"Staged {runtime_manifest['id']} {runtime_manifest['version']} for separate admin review.")
 print('releaseId='+rid)
 print('manifestDigest='+validation['manifestDigest'])
 PY

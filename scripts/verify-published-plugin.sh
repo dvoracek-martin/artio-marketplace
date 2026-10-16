@@ -9,4 +9,4 @@ url=f"{sys.argv[1].rstrip('/')}/api/v1/marketplace/plugins/{sys.argv[2]}/release
 with urllib.request.urlopen(url,timeout=20) as r: print(json.dumps(json.load(r)))
 PY
 )
-"$python" -c 'import json,sys; m=json.loads(sys.argv[1]); print("\n".join([m["image"]]+[s["image"] for s in m.get("services",[])]))' "$manifest" | while IFS= read -r image; do echo "docker pull $image"; docker pull "$image"; done
+"$python" -c 'import json,sys; m=json.loads(sys.argv[1]); m=m.get("packageManifest",m); print("\n".join([m["image"]]+[s["image"] for s in m.get("services",[])]))' "$manifest" | while IFS= read -r image; do echo "docker pull $image"; docker pull "$image"; done

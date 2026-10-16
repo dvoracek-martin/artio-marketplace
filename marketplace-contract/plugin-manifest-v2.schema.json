@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://artio.example/schemas/plugin-manifest-v2.schema.json",
+  "title": "Artio Docker plugin manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["packageManifest", "capabilities", "subscriptions"],
+  "properties": {
+    "packageManifest": {
+      "type": "object",
+      "description": "The unchanged package/runtime metadata fields, explicitly labeled manifestVersion 2.",
+      "additionalProperties": true,
+      "required": ["manifestVersion", "id", "name", "vendor", "version", "description", "minimumCoreVersion", "maximumCoreVersion", "image", "healthPath", "diagnosticsPath", "geographicAvailability"],
+      "properties": {
+        "manifestVersion": {"const": "2"},
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+        "version": {"type": "string"},
+        "image": {"type": "string", "pattern": "@sha256:[a-f0-9]{64}$"},
+        "extensionPoints": {"type": "array", "maxItems": 0, "description": "Forbidden in v2; declare capabilities explicitly."},
+        "healthPath": {"type": "string", "pattern": "^/"},
+        "diagnosticsPath": {"type": "string", "pattern": "^/"},
+        "geographicAvailability": {"type": "object"}
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capabilityId", "operations", "permissions"],
+        "properties": {
+          "capabilityId": {"type": "string"},
+          "operations": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"type": "string"}},
+          "permissions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "accountFingerprints": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+        }
+      }
+    },
+    "subscriptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["eventType", "schemaVersion"],
+        "properties": {
+          "eventType": {"type": "string"},
+          "schemaVersion": {"const": 1},
+          "permissions": {"type": "array", "maxItems": 0, "description": "Subscriptions convey only the frozen event facts, never ambient data permissions."}
+        }
+      }
+    }
+  }
+}

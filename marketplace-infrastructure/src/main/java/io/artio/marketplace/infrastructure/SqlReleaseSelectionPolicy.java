@@ -9,12 +9,14 @@ final class SqlReleaseSelectionPolicy {
         %s.moderation_state='ACTIVE'
         AND %s.publication_state='PUBLISHED'
         AND (CAST(? AS boolean) OR %s.version !~ '^[0-9]+\\.[0-9]+\\.[0-9]+-')
-        AND (CAST(? AS text) IS NULL OR (marketplace_semver_compare(CAST(? AS text),%s.manifest->>'minimumCoreVersion')>=0
-          AND marketplace_semver_compare(CAST(? AS text),%s.manifest->>'maximumCoreVersion')<=0))
-        AND (CAST(? AS text) IS NULL OR %s.manifest->'geographicAvailability'->>'scope'='GLOBAL'
-          OR jsonb_exists(%s.manifest->'geographicAvailability'->'countries',CAST(? AS text)))
+        AND (CAST(? AS text) IS NULL OR (marketplace_semver_compare(CAST(? AS text),COALESCE(%s.manifest->'packageManifest'->>'minimumCoreVersion',%s.manifest->>'minimumCoreVersion'))>=0
+          AND marketplace_semver_compare(CAST(? AS text),COALESCE(%s.manifest->'packageManifest'->>'maximumCoreVersion',%s.manifest->>'maximumCoreVersion'))<=0))
+        AND (CAST(? AS text) IS NULL OR COALESCE(%s.manifest->'packageManifest'->'geographicAvailability'->>'scope',%s.manifest->'geographicAvailability'->>'scope')='GLOBAL'
+          OR jsonb_exists(COALESCE(%s.manifest->'packageManifest'->'geographicAvailability'->'countries',%s.manifest->'geographicAvailability'->'countries'),CAST(? AS text)))
         """
-        .formatted(plugin, release, release, release, release, release, release);
+        .formatted(
+            plugin, release, release, release, release, release, release, release, release, release,
+            release, release, release);
   }
 
   static String orderBy(String release) {

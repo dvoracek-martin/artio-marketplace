@@ -56,6 +56,38 @@ class ManifestRulesTest {
   }
 
   @Test
+  void acceptsCoreCapabilityManifestV2WithoutChangingThePublishedEnvelope() throws Exception {
+    var manifest = v2Manifest("capability.payment-test");
+    var catalog = catalog("capability.payment-test");
+
+    var result = rules.validate(manifest, catalog);
+
+    assertTrue(result.valid(), "v2 manifest rejected: " + result.errors());
+    assertEquals("capability.payment-test", result.manifest().id());
+    assertEquals("2", manifest.path("packageManifest").path("manifestVersion").asText());
+  }
+
+  @Test
+  void rejectsUnsupportedCapabilitiesAndEventsInManifestV2() throws Exception {
+    var manifest = v2Manifest("capability.invalid-test");
+    ((com.fasterxml.jackson.databind.node.ArrayNode)
+            manifest.withArray("capabilities").get(0).get("operations"))
+        .add("unknownOperation");
+    manifest
+        .withArray("subscriptions")
+        .addObject()
+        .put("eventType", "customer.exported")
+        .put("schemaVersion", 1);
+
+    var result = rules.validate(manifest, catalog("capability.invalid-test"));
+
+    assertFalse(result.valid());
+    assertTrue(result.errors().stream().anyMatch(e -> e.contains("unsupported operation")));
+    assertTrue(
+        result.errors().stream().anyMatch(e -> e.contains("unsupported event subscription")));
+  }
+
+  @Test
   void rejectsMarkupAndUnsupportedLocalesInCatalogText() throws Exception {
     var manifest = fixture("stripe");
     var catalog = catalog(manifest.path("id").asText());
@@ -116,6 +148,25 @@ class ManifestRulesTest {
                  "icon":"sha256-%s","screenshots":[]}
                 """
                 .formatted(pluginId, "0".repeat(64)));
+  }
+
+  private com.fasterxml.jackson.databind.node.ObjectNode v2Manifest(String pluginId)
+      throws Exception {
+    var packageManifest = fixture("stripe");
+    packageManifest.put("manifestVersion", "2");
+    packageManifest.remove(List.of("extensionPoints", "permissions"));
+    var manifest = mapper.createObjectNode();
+    manifest.set("packageManifest", packageManifest);
+    manifest.set(
+        "capabilities",
+        mapper.readTree(
+            """
+                [{"capabilityId":"payment.provider.v1","operations":["createCheckout"],
+                  "permissions":["payment.process"],"accountFingerprints":{}}]
+                """));
+    manifest.set("subscriptions", mapper.createArrayNode());
+    packageManifest.put("id", pluginId);
+    return manifest;
   }
 
   private static String image(String repository) {

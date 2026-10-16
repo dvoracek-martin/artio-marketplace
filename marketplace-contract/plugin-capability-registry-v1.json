@@ -1,0 +1,15 @@
+{
+  "registryVersion": 1,
+  "ownership": "core",
+  "unknownCapability": "reject",
+  "unknownOperation": "reject",
+  "policies": ["EXCLUSIVE", "SELECT_ONE", "AGGREGATE_READ", "FAN_OUT_FACTS_ONLY", "PRIMARY_REPLICAS", "PINNED_ONE"],
+  "capabilities": [
+    {"id":"payment.provider.v1","operations":{"listMethods":{"permission":"payments.methods.read","policy":"AGGREGATE_READ","sideEffecting":false},"createCheckout":{"permission":"payment.process","policy":"SELECT_ONE","sideEffecting":true},"capture":{"permission":"payment.process","policy":"PINNED_ONE","sideEffecting":true},"cancel":{"permission":"payment.process","policy":"PINNED_ONE","sideEffecting":true},"refund":{"permission":"payment.process","policy":"PINNED_ONE","sideEffecting":true},"reconcile":{"permission":"payment.process","policy":"PINNED_ONE","sideEffecting":true},"verifyWebhook":{"permission":"payment.process","policy":"PINNED_ONE","sideEffecting":true}}},
+    {"id":"shipping.provider.v1","operations":{"listMethods":{"permission":"shipping.quote","policy":"AGGREGATE_READ","sideEffecting":false},"quote":{"permission":"shipping.quote","policy":"AGGREGATE_READ","sideEffecting":false},"createShipment":{"permission":"shipping.label","policy":"SELECT_ONE","sideEffecting":true},"purchaseLabel":{"permission":"shipping.label","policy":"PINNED_ONE","sideEffecting":true},"cancelShipment":{"permission":"shipping.label","policy":"PINNED_ONE","sideEffecting":true},"track":{"permission":"shipping.quote","policy":"PINNED_ONE","sideEffecting":false}}},
+    {"id":"catalog.search.v1","operations":{"search":{"permission":"catalog.read","policy":"AGGREGATE_READ","sideEffecting":false},"index":{"permission":"catalog.write","policy":"SELECT_ONE","sideEffecting":true},"remove":{"permission":"catalog.write","policy":"SELECT_ONE","sideEffecting":true},"beginRebuild":{"permission":"catalog.write","policy":"SELECT_ONE","sideEffecting":true},"commitRebuild":{"permission":"catalog.write","policy":"PINNED_ONE","sideEffecting":true},"abortRebuild":{"permission":"catalog.write","policy":"PINNED_ONE","sideEffecting":true}}},
+    {"id":"catalog.enrichment.v1","operations":{"enrich":{"permission":"catalog.read","policy":"EXCLUSIVE","sideEffecting":false}}},
+    {"id":"notification.channel.v1","operations":{"send":{"permission":"notifications.send","policy":"SELECT_ONE","sideEffecting":true}}},
+    {"id":"storage.object.v1","operations":{"put":{"permission":"storage.object.write","policy":"PRIMARY_REPLICAS","sideEffecting":true},"head":{"permission":"storage.object.read","policy":"PRIMARY_REPLICAS","sideEffecting":false},"get":{"permission":"storage.object.read","policy":"PRIMARY_REPLICAS","sideEffecting":false},"delete":{"permission":"storage.object.delete","policy":"PRIMARY_REPLICAS","sideEffecting":true}}}
+  ]
+}

@@ -270,6 +270,7 @@ public class JdbcCatalogQuery implements CatalogQuery {
       java.time.OffsetDateTime date,
       String locale) {
     Map<String, Object> manifest = json(manifestJson), meta = json(metadataJson);
+    Map<String, Object> packageManifest = stringMap(manifest.get("packageManifest"), manifest);
     var card = new LinkedHashMap<String, Object>();
     card.put("pluginId", id);
     card.put("slug", slug);
@@ -284,10 +285,10 @@ public class JdbcCatalogQuery implements CatalogQuery {
     card.put(
         "compatibility",
         Map.of(
-            "minimumCoreVersion", manifest.get("minimumCoreVersion"),
-            "maximumCoreVersion", manifest.get("maximumCoreVersion"),
+            "minimumCoreVersion", packageManifest.get("minimumCoreVersion"),
+            "maximumCoreVersion", packageManifest.get("maximumCoreVersion"),
             "installTimeChecksPending", true,
-            "requiredDependencies", manifest.getOrDefault("dependencies", List.of())));
+            "requiredDependencies", packageManifest.getOrDefault("dependencies", List.of())));
     return card;
   }
 
@@ -306,6 +307,13 @@ public class JdbcCatalogQuery implements CatalogQuery {
     } catch (Exception e) {
       throw new IllegalStateException("Stored catalog JSON is invalid", e);
     }
+  }
+
+  private Map<String, Object> stringMap(Object value, Map<String, Object> fallback) {
+    if (!(value instanceof Map<?, ?> nested)) return fallback;
+    var result = new LinkedHashMap<String, Object>();
+    nested.forEach((key, nestedValue) -> result.put(String.valueOf(key), nestedValue));
+    return result;
   }
 
   private void validate(String locale, String coreVersion, String country) {

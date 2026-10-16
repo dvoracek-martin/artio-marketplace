@@ -3,6 +3,7 @@ package io.artio.marketplace.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.extensions.PluginManifest;
+import io.artio.extensions.PluginManifestV2;
 import io.artio.extensions.PluginManifestValidator;
 import java.util.HashSet;
 import java.util.List;
@@ -45,15 +46,29 @@ public final class ManifestRules {
     inspectInput(catalog, "catalog", errors);
     PluginManifest parsed = null;
     try {
-      parsed = mapper.treeToValue(manifest, PluginManifest.class);
-      Set<String> declaredDependencies = new HashSet<>();
-      parsed.dependencies().forEach(d -> declaredDependencies.add(d.id()));
-      errors.addAll(validator.validate(parsed, parsed.minimumCoreVersion(), declaredDependencies));
+      if (manifest.has("packageManifest")) {
+        PluginManifestV2 parsedV2 = mapper.treeToValue(manifest, PluginManifestV2.class);
+        parsed = parsedV2.packageManifest();
+        Set<String> declaredDependencies = declaredDependencies(parsed);
+        errors.addAll(
+            validator.validate(parsedV2, parsed.minimumCoreVersion(), declaredDependencies));
+      } else {
+        parsed = mapper.treeToValue(manifest, PluginManifest.class);
+        Set<String> declaredDependencies = declaredDependencies(parsed);
+        errors.addAll(
+            validator.validate(parsed, parsed.minimumCoreVersion(), declaredDependencies));
+      }
     } catch (Exception ex) {
-      errors.add("manifest does not match the pinned Core PluginManifest v1 contract");
+      errors.add("manifest does not match the supported Core PluginManifest v1/v2 contract");
     }
     validateCatalog(catalog, parsed, errors);
     return new Validation(parsed, errors.stream().distinct().toList());
+  }
+
+  private static Set<String> declaredDependencies(PluginManifest manifest) {
+    Set<String> dependencies = new HashSet<>();
+    manifest.dependencies().forEach(dependency -> dependencies.add(dependency.id()));
+    return dependencies;
   }
 
   private void validateCatalog(JsonNode c, PluginManifest m, List<String> errors) {

@@ -4,26 +4,26 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `911f8196b1d76113804e274009e07ada17f15b33`
-- Commit subject/date: `fix(ci): account for upstream observability CVEs` / 2026-10-15
-- Worktree status at inspection: 43 modified/deleted/untracked paths. No worktree content was used as authoritative source; only `git show HEAD:<path>` was read. Core remains untouched by Marketplace work.
+- Commit: `9dbc406fa351432a596f0cae1067009d53121db5`
+- This pin includes the v5.1 capability-envelope v2 contract and Backoffice Marketplace manifest dispatch. Core remains untouched by Marketplace work.
+- The v5.1 commit is present in the local Core checkout but is not yet reachable from the public remote. Marketplace CI therefore retains its last published Core pin (`911f8196b1d76113804e274009e07ada17f15b33`) for the existing v1 runtime acceptance. The new v2 publisher, registry-artifact and PostgreSQL catalog tests run in Marketplace CI; the Core v2 route is covered by the local Core contract/API tests. Update the CI source pin after the Core commit becomes available upstream.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
-## Runtime contract observed at the pinned commit
+## Runtime manifest contracts observed at the pinned commit
 
-`marketplace-contract` contains an unchanged source snapshot from the pinned Core commit of:
+`marketplace-contract` retains the Core v1 runtime types and adds the v5.1 v2 envelope types/validators from this Core pin:
 
 - `artio-extensions/.../PluginManifest.java`
 - `artio-extensions/.../PluginManifestValidator.java`
 - `artio-extensions/.../PluginDependencyPolicy.java`
 
-The record field names and nested record types are the Core v1 contract. `PluginManifestValidator` also owns limits and allowlists for IDs, SHA-pinned image references, Core SemVer bounds, permissions, extension points, dependencies, config fields, paths, geographic availability and up to eight sidecars. It takes the actual Core version, the trusted registry list, and installed plugin IDs; publisher validation cannot claim those customer-specific install checks have been completed. Marketplace passes the manifest's minimum supported Core version as a syntax/range fixture and declared dependencies as a structural fixture only. Core must still validate the real customer version, installed dependencies, configuration and lifecycle at install time.
+The original v1 shape remains accepted unchanged for existing releases. v2 uses a `packageManifest` runtime envelope plus explicit `capabilities` and `subscriptions`; its capability and event names are checked against Core's closed registries. The Marketplace validators preserve Core's structural limits and validate nested package metadata and every OCI artifact. Publisher validation passes the manifest's minimum supported Core version as a syntax/range fixture and declared dependencies as a structural fixture only. Core must still validate the real customer version, trusted registry, installed dependencies, configuration and lifecycle at install time. Manifest contract v2 is not a REST API version: all Core endpoints remain `/api/v1` until the first production release.
 
 Core Docker runtime starts the primary image and sidecars in declared dependency order, checks each health path, persists declared volumes and enforces image digests and resource boundaries. `ExtensionRuntimeController` uses an internal controller protocol. Marketplace does not start or invoke plugin containers.
 
 ## Versioned Core management routes
 
-At the pinned commit, `ExtensionManagementController` has an internal Spring mapping `@RequestMapping("/api/admin/extensions")`. Core's `ApiVersioningFilter` maps canonical incoming `/api/v1/...` requests to those existing handlers, and Core's integration tests exercise the management routes under `/api/v1/admin/extensions/**`. Use the versioned public paths documented by Core: `/validate`, `/register`, `/{pluginId}/configuration`, `/install`, `/enable`, `/disable`, `/update`, `/rollback`, `/{pluginId}/health`, `/{pluginId}/invoke`, `/{pluginId}/audit`, and deletion/uninstall. The internal extension-controller routes under `/internal/v1/extensions/**` are a separate private runtime protocol. Marketplace adds no Core client and does not call the legacy aliases.
+Core's extension management and Marketplace proxy controllers are versioned under `/api/v1`. Core imports v1 manifests through `/api/v1/admin/extensions/register` and v2 envelopes through `/api/v1/admin/extensions/register-v2`; both remain one development REST surface. The internal extension-controller routes under `/internal/v1/extensions/**` are a separate private runtime protocol. Marketplace does not call legacy unversioned aliases.
 
 ## Template review
 
@@ -43,6 +43,6 @@ Core's `ARTIO_EXTENSION_TRUSTED_REGISTRIES` defaults to empty. For a host-run de
 
 The missing development smoke is: obtain the exact manifest from Marketplace, call Core's `/api/v1/admin/extensions/validate`, register it, then call install and verify the Docker runtime pulls the digest from the trusted local Zot. This sequence has **not** been run against a live Core. CI's pinned runtime/controller/catalog tests are narrower and do not substitute for it. The Core checkout at `D:\Development\Projects\Artio` was already dirty during this review and must not be used as a disposable test target; use a clean isolated checkout or user-provided Core test environment.
 
-## Drift gate
+## Compatibility verification
 
-CI checks out the Core repository at the exact pin and byte-compares the three copied sources to this module. It builds isolated runtime/controller fixtures from that checkout; there is no standing Core process or Marketplace-to-Core client connection. Updating the Core contract requires an explicit pin change, copied-source review, fixture update and contract test update. Marketplace does not depend on the whole Core build or Spring application.
+CI checks out the Core repository at the exact pin and builds isolated runtime/controller fixtures from that checkout; there is no standing Core process or Marketplace-to-Core client connection. Contract changes require an explicit pin change, schema/validator review, fixture updates and tests for both v1 and v2. The PostgreSQL catalog integration test covers nested v2 Core-version and geographic filtering and verifies the returned compatibility bounds/dependencies. Marketplace does not depend on the whole Core build or Spring application.
