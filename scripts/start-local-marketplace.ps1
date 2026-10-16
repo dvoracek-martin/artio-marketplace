@@ -132,14 +132,23 @@ if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to start. Check Docker D
 
 $apiPort = [int]$env:MARKETPLACE_API_PORT
 $managementPort = [int]$env:MARKETPLACE_MANAGEMENT_PORT
+$registryPort = [int]$env:MARKETPLACE_REGISTRY_PORT
 $readyUrl = "http://127.0.0.1:$managementPort/actuator/health/readiness"
+$registryUrl = "http://127.0.0.1:$registryPort/v2/"
 $deadline = (Get-Date).AddMinutes(3)
 $ready = $false
 while ((Get-Date) -lt $deadline) {
+  $apiReady = $false
+  $registryReady = $false
   try {
     $health = Invoke-RestMethod -Uri $readyUrl -TimeoutSec 4
-    if ($health.status -eq 'UP') { $ready = $true; break }
+    $apiReady = ($health.status -eq 'UP')
   } catch { }
+  try {
+    $registryResponse = Invoke-WebRequest -UseBasicParsing -Uri $registryUrl -TimeoutSec 4
+    $registryReady = ([int]$registryResponse.StatusCode -eq 200)
+  } catch { }
+  if ($apiReady -and $registryReady) { $ready = $true; break }
   Start-Sleep -Seconds 3
 }
 if (-not $ready) {
