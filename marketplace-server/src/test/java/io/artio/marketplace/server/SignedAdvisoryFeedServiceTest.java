@@ -78,4 +78,65 @@ class SignedAdvisoryFeedServiceTest {
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("Marketplace advisory signing is not configured");
   }
+
+  @Test
+  void advisorySigningCanRotateToANewKeyWithoutAcceptingTheRetiredKey() throws Exception {
+    KeyPairGenerator generator = KeyPairGenerator.getInstance("Ed25519");
+    KeyPair oldKey = generator.generateKeyPair();
+    KeyPair newKey = generator.generateKeyPair();
+    JdbcTemplate jdbc = mockFeedState();
+
+    Map<String, Object> oldEnvelope = signedSnapshot(jdbc, "advisory-old", oldKey);
+    Map<String, Object> newEnvelope = signedSnapshot(jdbc, "advisory-new", newKey);
+
+    assertThat(verifySnapshot(oldEnvelope, oldKey)).isTrue();
+    assertThat(verifySnapshot(newEnvelope, newKey)).isTrue();
+    assertThat(verifySnapshot(newEnvelope, oldKey)).isFalse();
+    @SuppressWarnings("unchecked")
+    Map<String, String> oldSignature = (Map<String, String>) oldEnvelope.get("signature");
+    @SuppressWarnings("unchecked")
+    Map<String, String> newSignature = (Map<String, String>) newEnvelope.get("signature");
+    assertThat(oldSignature).containsEntry("keyId", "advisory-old");
+    assertThat(newSignature).containsEntry("keyId", "advisory-new");
+  }
+
+  private Map<String, Object> signedSnapshot(JdbcTemplate jdbc, String keyId, KeyPair keyPair) {
+    return new SignedAdvisoryFeedService(
+            jdbc,
+            new ObjectMapper(),
+            keyId,
+            Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded()),
+            java.time.Duration.ofHours(24))
+        .signedSnapshot();
+  }
+
+  private JdbcTemplate mockFeedState() throws Exception {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    ResultSet resultSet = mock(ResultSet.class);
+    org.mockito.Mockito.when(resultSet.next()).thenReturn(true);
+    org.mockito.Mockito.when(resultSet.getLong(1)).thenReturn(17L);
+    org.mockito.Mockito.when(resultSet.getObject(2, OffsetDateTime.class))
+        .thenReturn(OffsetDateTime.parse("2026-10-16T10:00:00Z"));
+    doAnswer(
+            invocation ->
+                ((ResultSetExtractor<?>) invocation.getArgument(1)).extractData(resultSet))
+        .when(jdbc)
+        .query(anyString(), any(ResultSetExtractor.class));
+    org.mockito.Mockito.when(jdbc.query(anyString(), any(RowMapper.class)))
+        .thenReturn(java.util.List.of());
+    return jdbc;
+  }
+
+  private boolean verifySnapshot(Map<String, Object> envelope, KeyPair keyPair) throws Exception {
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = (Map<String, Object>) envelope.get("payload");
+    @SuppressWarnings("unchecked")
+    Map<String, String> signatureBlock = (Map<String, String>) envelope.get("signature");
+    Signature verifier = Signature.getInstance("Ed25519");
+    verifier.initVerify(keyPair.getPublic());
+    verifier.update(
+        ReleaseDescriptorCanonicalizer.canonicalBytes(
+            new ObjectMapper().writeValueAsString(payload)));
+    return verifier.verify(Base64.getUrlDecoder().decode(signatureBlock.get("value")));
+  }
 }

@@ -9,11 +9,17 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.artio.extensions.ReleaseDescriptorCanonicalizer;
 import io.artio.marketplace.application.ArtifactPromoter;
 import io.artio.marketplace.application.ArtifactVerifier;
 import io.artio.marketplace.infrastructure.MediaStore;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
+import java.security.Signature;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -197,6 +203,58 @@ class PublicationRecoveryPostgresIntegrationTest {
     assertRelease("PUBLISHED", "PUBLISHED", null, 2);
   }
 
+  @Test
+  void releaseSigningKeyRotationSupportsOverlapThenRejectsRetiredKey() throws Exception {
+    jdbc.update(
+        "UPDATE marketplace_releases SET publication_state='PUBLISHED',published_at=now() WHERE release_id=?::uuid",
+        RELEASE_ID);
+    ObjectMapper mapper = new ObjectMapper();
+    KeyPairGenerator generator = KeyPairGenerator.getInstance("Ed25519");
+    KeyPair oldKey = generator.generateKeyPair();
+    KeyPair newKey = generator.generateKeyPair();
+    String oldPublicKey = encodePublicKey(oldKey);
+    String newPublicKey = encodePublicKey(newKey);
+
+    var beforeRotation =
+        new ReleaseDescriptorService(
+            jdbc, mapper, mock(SecurityAdvisoryOperations.class), "release-old=" + oldPublicKey);
+    JsonNode descriptor = beforeRotation.descriptor(RELEASE_ID);
+    ObjectNode oldEnvelope = signEnvelope(mapper, descriptor, "release-old", oldKey);
+    beforeRotation.verifyAndStore(RELEASE_ID, oldEnvelope);
+    assertThat(beforeRotation.signature(RELEASE_ID).get("signature"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("keyId", "release-old");
+
+    var overlap =
+        new ReleaseDescriptorService(
+            jdbc,
+            mapper,
+            mock(SecurityAdvisoryOperations.class),
+            "release-old=" + oldPublicKey + ",release-new=" + newPublicKey);
+    ObjectNode newEnvelope = signEnvelope(mapper, descriptor, "release-new", newKey);
+    jdbc.execute("SELECT pg_sleep(0.01)");
+    overlap.verifyAndStore(RELEASE_ID, newEnvelope);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM release_signatures WHERE release_id=?::uuid",
+                Integer.class,
+                RELEASE_ID))
+        .isEqualTo(2);
+    assertThat(overlap.signature(RELEASE_ID).get("signature"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("keyId", "release-new");
+
+    var afterRetirement =
+        new ReleaseDescriptorService(
+            jdbc, mapper, mock(SecurityAdvisoryOperations.class), "release-new=" + newPublicKey);
+    assertThatThrownBy(() -> afterRetirement.verifyAndStore(RELEASE_ID, oldEnvelope))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Signing key is not trusted by Marketplace");
+    assertThat(afterRetirement.signature(RELEASE_ID).get("signature"))
+        .asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.MAP)
+        .containsEntry("keyId", "release-new");
+  }
+
   private void assertRelease(
       String releaseState, String promotionState, String error, int attempts) {
     assertThat(
@@ -218,5 +276,26 @@ class PublicationRecoveryPostgresIntegrationTest {
     return HexFormat.of()
         .formatHex(
             MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  private static String encodePublicKey(KeyPair keyPair) {
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(keyPair.getPublic().getEncoded());
+  }
+
+  private static ObjectNode signEnvelope(
+      ObjectMapper mapper, JsonNode descriptor, String keyId, KeyPair keyPair) throws Exception {
+    Signature signer = Signature.getInstance("Ed25519");
+    signer.initSign(keyPair.getPrivate());
+    signer.update(
+        ReleaseDescriptorCanonicalizer.canonicalBytes(mapper.writeValueAsString(descriptor)));
+    String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(signer.sign());
+    ObjectNode envelope = mapper.createObjectNode();
+    envelope.set("descriptor", descriptor.deepCopy());
+    envelope
+        .putObject("signature")
+        .put("algorithm", "Ed25519")
+        .put("keyId", keyId)
+        .put("value", signature);
+    return envelope;
   }
 }
