@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: dvoracek-martin/artio
-          ref: 3003154
+          ref: 3003154a0fbc97cd86a6810a4956a2a6c2d38050
           path: artio-core
           persist-credentials: false
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1

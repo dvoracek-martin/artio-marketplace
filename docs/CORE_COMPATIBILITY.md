@@ -4,7 +4,7 @@
 
 - Repository: `https://github.com/dvoracek-martin/artio`
 - Branch at implementation start: `main`
-- Commit: `3003154` (`Document live Marketplace security acceptance`)
+- Commit: `3003154a0fbc97cd86a6810a4956a2a6c2d38050` (`Document live Marketplace security acceptance`)
 - This public Core pin includes the v5.1 capability-envelope v2 contract, signed release-descriptor verification, durable registered-plugin installation jobs, signed Marketplace advisory verification with local exact-digest enforcement, encrypted credentials for explicitly trusted private OCI registries, and the server-side official-release-to-job path. Marketplace CI checks out this exact commit in an isolated workspace and does not modify Core.
 - Core Spring Boot: 4.1.1 (root Gradle plugin declaration); Gradle wrapper: 9.8.1.
 
