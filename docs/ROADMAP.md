@@ -14,7 +14,7 @@ This is the Marketplace-side progress ledger for the approved 2026-10-16 integra
 | Core durable installation saga, custom registry, and secured local OCI/Docker archive import | OPEN | Core remains authoritative for install/runtime. Do not route arbitrary client payloads through the official trust path. |
 | Signed support/removal/security advisory feed and local digest-level ban enforcement | OPEN | Core must enforce bans against every runtime path and already-running container while preserving business obligations. No remote Core control channel. |
 | Per-instance v2 upgrade/rollback, status-aware Backoffice, and job diagnostics | OPEN | Keep source, support, security and lifecycle dimensions separate. |
-| Exact compatible Core pin and required cross-repository CI acceptance | OPEN | The local Core acceptance passed for Marketplace v2 import and Docker lifecycle. Update Marketplace CI only after a mutually compatible Core commit is published and its mandatory acceptance is green. |
+| Exact compatible Core pin and required cross-repository CI acceptance | OPEN | Core `bdd1b80d8f020eca05e3000b6435f18aa835d8bd` is published and pinned in CI after the local signed-descriptor/Core acceptance passed. The newly pinned GitHub workflow is awaiting its run; this gate closes only when that exact cross-repository CI acceptance passes. |
 
 ## Verified local checkpoint (2026-10-16)
 
