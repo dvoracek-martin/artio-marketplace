@@ -1,0 +1,6 @@
+services:
+  marketplace:
+    volumes:
+      # Keep the Zot web UI opt-in for local development; production uses the
+      # base compose file and the UI-disabled config baked into the image.
+      - ./zot/config.dev.json:/etc/zot/config.json:ro

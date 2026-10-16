@@ -118,6 +118,7 @@ These are local secrets. Do not share them or commit this folder.
 Marketplace API:       http://127.0.0.1:$apiPort
 Readiness:             http://127.0.0.1:$managementPort/actuator/health/readiness
 Public OCI registry:   localhost:$registryPort
+Zot registry UI:       http://127.0.0.1:$registryPort
 Publisher OCI registry: localhost:$registryPublishPort
 "@
 } elseif (-not (Test-Path -LiteralPath $htpasswdFile) -or -not (Test-Path -LiteralPath $credentialsFile)) {
@@ -125,8 +126,8 @@ Publisher OCI registry: localhost:$registryPublishPort
 }
 
 Set-ComposeEnvironmentFromFile $envFile
-$composeArgs = @('--project-name', 'artio-marketplace-local', '--env-file', $envFile, '-f', $composeFile)
-Write-Host 'Building and starting Marketplace, PostgreSQL, Zot, and the registry gateway...'
+$composeArgs = @('--project-name', 'artio-marketplace-local', '--env-file', $envFile, '-f', $composeFile, '-f', (Join-Path $repoRoot 'deployment/compose.dev.yaml'))
+Write-Host 'Building and starting Marketplace, PostgreSQL, Zot (including its local web UI), and the registry gateway...'
 docker compose @composeArgs up --build -d
 if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to start. Check Docker Desktop and the messages above.' }
 
@@ -159,5 +160,6 @@ if (-not $ready) {
 Write-Host ''
 Write-Host 'Marketplace is ready.' -ForegroundColor Green
 Get-Content -LiteralPath (Join-Path $stateDirectory 'connection.txt')
+Write-Host "Zot registry UI:      http://127.0.0.1:$registryPort"
 Write-Host "Local API credentials: $stateDirectory (publisher-token.txt, admin-token.txt, revocation-token.txt)"
 Write-Host 'Keep that folder private. Stop with: docker compose --project-name artio-marketplace-local --env-file .local-marketplace/.env -f deployment/compose.yaml down'

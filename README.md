@@ -20,7 +20,9 @@ You do **not** need Java, Gradle, or a separately running Artio Core. Install an
 
 Double-click [`Start Marketplace.bat`](Start%20Marketplace.bat) in the repository root. The first start generates separate local publisher/admin/revocation tokens and a Zot password in the ignored `.local-marketplace` folder, selects available loopback ports, builds the Marketplace image, starts its dependencies, and waits for readiness. Later starts reuse the same credentials and data.
 
-The script prints the local addresses. Defaults are API `http://127.0.0.1:18080`, public registry `localhost:15000`, and publisher registry `localhost:15001`; if any is busy, it selects another free port. The API, management, and registry ports bind to loopback only. Docker-internal ports are isolated inside this Compose network. This keeps the default ports away from common Artio services and avoids taking ports already in use. The selected ports and credentials are recorded in `.local-marketplace`.
+The script prints the local addresses. Defaults are API `http://127.0.0.1:18080`, public registry `localhost:15000`, and publisher registry `localhost:15001`; if any is busy, it selects another free port. The Zot UI is available at `http://127.0.0.1:<public-registry-port>` (for example, `http://127.0.0.1:15000`). The API, management, and registry ports bind to loopback only. Docker-internal ports are isolated inside this Compose network. This keeps the default ports away from common Artio services and avoids taking ports already in use. The selected ports and credentials are recorded in `.local-marketplace`.
+
+The local Zot UI allows anonymous browsing of public registry repositories. To sign in for publisher operations, use username `publisher` and the password in `.local-marketplace/zot-password.txt`. The one-click development launcher enables the UI through [`deployment/compose.dev.yaml`](deployment/compose.dev.yaml); the base Compose deployment keeps it disabled.
 
 To stop the services while keeping data, run from the repository directory:
 
@@ -32,7 +34,13 @@ Run `Start Marketplace.bat` again to resume. Do not add `--volumes` unless you i
 
 ### macOS/Linux or manual Docker Compose
 
-The Compose file can also be started with your own `.env` and secrets; see [deployment setup](docs/DEPLOYMENT.md) and [.env.example](.env.example). The default host ports are `8080` (API), `8081` (management), `5000` (public registry), and `5001` (publisher registry), all bound to `127.0.0.1`. Override them with `MARKETPLACE_API_PORT`, `MARKETPLACE_MANAGEMENT_PORT`, `MARKETPLACE_REGISTRY_PORT`, and `MARKETPLACE_REGISTRY_PUBLISH_PORT` if another service already uses one.
+The development stack can be started with your own `.env` and secrets; see [deployment setup](docs/DEPLOYMENT.md) and [.env.example](.env.example). Include `-f deployment/compose.dev.yaml` to enable the Zot UI:
+
+```sh
+docker compose --env-file .env -f deployment/compose.yaml -f deployment/compose.dev.yaml up --build -d
+```
+
+The default host ports are `8080` (API), `8081` (management), `5000` (public registry and Zot UI), and `5001` (publisher registry), all bound to `127.0.0.1`. Override them with `MARKETPLACE_API_PORT`, `MARKETPLACE_MANAGEMENT_PORT`, `MARKETPLACE_REGISTRY_PORT`, and `MARKETPLACE_REGISTRY_PUBLISH_PORT` if another service already uses one. Without the development override, Zot UI remains disabled.
 
 For local development, Zot serves HTTP. Docker clients that push/pull images must trust the selected localhost registry ports as insecure registries. Configure this in Docker Desktop's **Settings → Docker Engine**, then apply/restart Docker Desktop. A Core instance that installs local images must additionally trust the public registry host in `ARTIO_EXTENSION_TRUSTED_REGISTRIES`. The one-click starter does not change Docker Engine or Core configuration.
 
@@ -40,7 +48,7 @@ For internet-facing deployment, do not expose these local Compose ports directly
 
 ## Publish a plugin
 
-Marketplace itself has no graphical backoffice: plugin staging, approval, publication, and moderation use the versioned REST API and the included scripts. The public catalog is also API-only; see [OpenAPI](marketplace-contract/openapi.yaml). Zot does have an optional registry UI ([upstream project](https://github.com/project-zot/zui)), but it is disabled in this deployment (`extensions.ui.enable: false` in [`deployment/zot/config.json`](deployment/zot/config.json)). If enabled, it would provide a UI for browsing the OCI registry, not Marketplace plugin publication or moderation. Payments and licensing are not implemented.
+Marketplace itself has no graphical backoffice: plugin staging, approval, publication, and moderation use the versioned REST API and the included scripts. The public catalog is also API-only; see [OpenAPI](marketplace-contract/openapi.yaml). Zot provides a separate optional UI ([upstream project](https://github.com/project-zot/zui)) for browsing and managing OCI registry content. It is enabled for local development by [`deployment/zot/config.dev.json`](deployment/zot/config.dev.json) and disabled in the base/production configuration ([`deployment/zot/config.json`](deployment/zot/config.json)). The Zot UI does not publish or moderate Marketplace releases. Payments and licensing are not implemented.
 
 1. Prepare a plugin package containing `manifest.json`, `catalog.json`, and the referenced icon/screenshots. Its runtime images (including sidecars) must be built and pushed to Zot first. The manifest must reference the public registry address with an immutable `@sha256:...` digest.
 2. Push the image to the publisher registry. For a one-click local stack, configure the two `localhost` registry ports listed in `.local-marketplace/connection.txt` as insecure registries in Docker Desktop (**Settings → Docker Engine**; add them to any existing configuration and apply/restart). Then read the selected ports and push the image:
