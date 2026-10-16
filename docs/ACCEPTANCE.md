@@ -4,9 +4,9 @@ This status distinguishes successful checks from failures and checks that have n
 
 ## Latest verified source commit
 
-Commit `a057638cf26dc70a2d60ca2b25b68ff9eac5a3bf` was pushed to `main`. GitHub Actions run [38825213413](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38825213413) completed successfully. It verified Java 25.0.4, Gradle 9.8.1, formatting, unit/architecture tests, JaCoCo, OpenAPI lint, a live Compose/PostgreSQL/Zot stack, the Docker acceptance script, SPDX SBOM generation, Trivy, and stack cleanup.
+Commit `7de67c23bd16f87687c1b6fc7ce530354fd534a7` was pushed to `main`. GitHub Actions run [38827486941](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38827486941) completed successfully. It verified Java 25.0.4, Gradle 9.8.1, formatting, unit/architecture tests, JaCoCo, OpenAPI lint, a live Compose/PostgreSQL/Zot stack, the Docker acceptance script, the backup/restore drill, SPDX SBOM generation, Trivy, and stack cleanup.
 
-The live acceptance shell script exited 1 only after recording a failure from one pinned Artio Core test; the workflow intentionally continues to SBOM and scans. The hosted GitHub Actions run is green, but the Core controller check itself is not green.
+The live acceptance shell script exited 1 only after recording a failure from one pinned Artio Core test; the workflow intentionally continues to the separately gated restore drill, SBOM and scans. The hosted GitHub Actions run is green, but the Core controller check itself is not green.
 
 ## Results
 
@@ -24,18 +24,19 @@ The live acceptance shell script exited 1 only after recording a failure from on
 | Core packaged controller flow | FAIL | Pinned Core `PackagedExtensionControllerIntegrationTests.packagedControllerAuthenticatesAndManagesPrivateBundleWithoutCommerceServices` failed at `PackagedExtensionControllerIntegrationTests.java:146` with `NullPointerException` while dereferencing the health response. Core was not changed. The exact Core controller boundary therefore is not verified as passing. |
 | Core egress integration test | NOT RUN | `DockerExtensionRuntimeIntegrationTests.restrictsRealPluginEgressToTheProviderGateway` was skipped by its test fixture. |
 | Offline-after-install | PARTIAL | CI stopped the Marketplace service while the independently running reference extension remained healthy and returned the same authenticated invocation result. A full Core Plugin Manager offline install/update failure-diagnostic path was not run. |
-| Backup/restore drill | NOT RUN | Run 38826852486 invoked the script successfully but its first manifest read returned HTTP 429 because the preceding rate-limit acceptance had exhausted the public API quota. The failure happened before backup capture or volume deletion; CI cleanup removed only ephemeral acceptance volumes. The drill now restarts only its disposable Marketplace service to reset that test quota before probing; wait for another CI run before treating restore as verified. |
+| Backup/restore drill | PASS | CI run 38827486941 backed up PostgreSQL, Zot and media after a controlled Marketplace restart; destroyed only its unique acceptance project's volumes; restored fresh volumes; confirmed the published manifest was byte-for-byte identical and pulled its image by digest. |
 | Full Core Admin Plugin Manager install/register/enable/uninstall using the exact published manifest | NOT RUN | The isolated pinned Core runtime and catalog tests cover real Docker lifecycle and catalog policy, but the full admin-controller flow did not pass. No deployed customer Core is assumed or contacted. |
 | Local Windows end-to-end Docker acceptance | NOT RUN for the latest outage/restore script | Previous local OCI acceptance evidence predates the added outage scenario; the current live acceptance is run in isolated GitHub CI. |
 | Scaling to thousands of independent Core installations | NOT RUN | Architecture has no per-customer Core connections or Docker socket, but no representative load profile or throughput test has been performed. |
 
 ## GitHub Actions run contents
 
-The successful run reported:
+The successful run 38827486941 reported:
 
 - Gradle, Spotless, unit/architecture tests and JaCoCo: PASS.
 - OpenAPI lint: PASS.
 - Live Zot/OCI/catalog/plugin acceptance: PASS except the pinned Core packaged-controller test noted above.
+- Isolated PostgreSQL/Zot/media backup and restore, immutable-manifest comparison, and OCI digest pull: PASS.
 - SPDX SBOM generation and artifact upload: PASS.
 - Trivy image scan: PASS under the time-limited upstream Zot/Tomcat CVE exceptions in `.trivyignore` and [Security](SECURITY.md).
 - Ephemeral Compose teardown with volumes: PASS.
