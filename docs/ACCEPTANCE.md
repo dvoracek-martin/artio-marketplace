@@ -41,12 +41,13 @@ Hardening commit `e9bca63db6fa5653e1909bec8135739d907d0ba8` was pushed to `main`
 
 - Java 25 compile, formatting, unit/architecture tests, and coverage: **PASS**.
 - OpenAPI lint, V1-to-V2 migration, acceptance-gate failure injection, and Marketplace/PostgreSQL/Zot startup: **PASS**.
-- Live Zot/OCI/public API acceptance step: **FAIL** because the pinned Core `PackagedExtensionControllerIntegrationTests.packagedControllerAuthenticatesAndManagesPrivateBundleWithoutCommerceServices` failed at Core test line 146 with `NullPointerException` while dereferencing `remote.health(current).healthy()`. The Marketplace workflow checks out Core in a separate workspace; Core was not changed.
+- Live Docker acceptance shell (Zot ACL, OCI publication, public APIs, restricted reference plugin, Marketplace outage, and rate limit): **PASS**, ending with `Docker acceptance passed`.
+- The encompassing required CI step then ran pinned Core compatibility tests and **FAIL**ed because `PackagedExtensionControllerIntegrationTests.packagedControllerAuthenticatesAndManagesPrivateBundleWithoutCommerceServices` failed at Core test line 146 with `NullPointerException` while dereferencing `remote.health(current).healthy()`. The Marketplace workflow checks out Core in a separate workspace; Core was not changed.
 - Isolated PostgreSQL/Zot/media backup and restore with manifest comparison and digest pull: **PASS**, including after the acceptance failure.
 - SPDX SBOM generation: **PASS**; artifact upload: **SKIPPED** because the required acceptance gate failed.
 - Trivy HIGH/CRITICAL image scan and ephemeral stack teardown: **PASS**.
 
-The hosted run confirms that the CI gate now reports the pinned Core failure instead of suppressing it. The Core controller flow remains unverified as passing and needs a separately scoped Core fix. The Marketplace changes are pushed, but this workflow is red and the release gate is not green.
+The hosted runs confirm that the CI gate now reports the pinned Core failure instead of suppressing it, even though the Marketplace Docker acceptance itself passes. The Core controller flow remains unverified as passing and needs a separately scoped Core fix. The Marketplace changes are pushed, but this workflow is red and the release gate is not green.
 
 ## GitHub Actions run contents
 
