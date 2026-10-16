@@ -3,7 +3,7 @@ WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/root/.gradle chmod +x gradlew && ./gradlew --no-daemon :marketplace-server:bootJar
 
-FROM ghcr.io/project-zot/zot@sha256:6b69512c00dceaad05b1144e6079aac6aa7309d7fd200f9947ecb1de09cf48c8 AS zot
+FROM ghcr.io/project-zot/zot@sha256:96cda11459ce6f8c60da3b03f03e9f67fd11b3ae2d82c4c04c92b3c608996080 AS zot
 
 FROM eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab
 ENV HOME=/tmp LANG=C.UTF-8

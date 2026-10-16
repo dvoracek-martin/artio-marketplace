@@ -20,6 +20,10 @@ The updated `scripts/docker-acceptance.sh` passed against the pinned Zot 2.1.21 
 
 The matching Core command fetched and registered the Marketplace v2 manifest and exercised real Docker install/invoke/update/rollback, sidecar health and data retention, and two-instance isolation against the promoted OCI index. The selected Integration task ran 6 tests: 5 passed and the fixture-gated egress test was skipped. The API unit suite passed 162/162 after its persisted-permission fixtures were updated with the required `tokenVersion` claim and `token_version` DB field. Marketplace `spotlessCheck build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` passed.
 
+## Signed Zot 2.1.22 to Marketplace to Core acceptance (2026-10-16)
+
+The live signed-descriptor acceptance passed against the pinned signed Zot 2.1.22 image index. It verified anonymous public pulls and denied writes, authenticated OCI publication, digest retention after tag overwrite, multi-platform artifacts, catalog filtering and localization, separate approval roles, signed advisory revocation, Core manifest import and restricted plugin invocation. Core's real Docker runtime tests passed install/invoke/update/rollback, sidecar health and data retention, same-release instance isolation, and exact-digest revocation. The acceptance script's exit trap removed its test containers, images, files, volumes and Compose network; a follow-up check found no run-named containers or volumes. The updated image awaits the Marketplace CI Trivy result.
+
 Cleanup removed only the acceptance project's PostgreSQL, Zot and catalog-assets volumes, its network and containers, the locally built `artio-marketplace:local` image, and reference image tags/digests created by acceptance. A final Docker check found no containers, volumes or test tags belonging to that project. Signed release descriptors/Core verification, interrupted-promotion recovery and deliberate catalog-invisibility fault injection remain open; this evidence closes the Zot-native/index-copy gate only.
 
 ## Results
