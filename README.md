@@ -22,7 +22,7 @@ Double-click [`Start Marketplace.bat`](Start%20Marketplace.bat) in the repositor
 
 The script prints the local addresses. Defaults are API `http://127.0.0.1:18080`, public registry `localhost:15000`, and publisher registry `localhost:15001`; if any is busy, it selects another free port. The Zot UI is available at `http://127.0.0.1:<public-registry-port>` (for example, `http://127.0.0.1:15000`). The API, management, and registry ports bind to loopback only. Docker-internal ports are isolated inside this Compose network. This keeps the default ports away from common Artio services and avoids taking ports already in use. The selected ports and credentials are recorded in `.local-marketplace`.
 
-The local Zot UI allows anonymous browsing of public registry repositories. To sign in for publisher operations, use username `publisher` and the password in `.local-marketplace/zot-password.txt`. The one-click development launcher enables the UI through [`deployment/compose.dev.yaml`](deployment/compose.dev.yaml); the base Compose deployment keeps it disabled.
+The local Zot UI allows anonymous browsing of public registry repositories. To stage plugin images, sign in with username `publisher` and the password in `.local-marketplace/zot-password.txt`; that identity can write only under private `staging/**`. Approved releases are copied by Marketplace using a separate promoter credential stored in `.local-marketplace/zot-promotion-password.txt`. The one-click development launcher enables the UI through [`deployment/compose.dev.yaml`](deployment/compose.dev.yaml); the base Compose deployment keeps it disabled.
 
 To stop the services while keeping data, run from the repository directory:
 
@@ -57,12 +57,14 @@ Marketplace itself has no graphical backoffice: plugin staging, approval, public
    $settings = Get-Content '.local-marketplace/.env'
    $pushPort = [int](($settings | Where-Object { $_ -like 'MARKETPLACE_REGISTRY_PUBLISH_PORT=*' }) -split '=', 2)[1]
    $publicPort = [int](($settings | Where-Object { $_ -like 'MARKETPLACE_REGISTRY_PORT=*' }) -split '=', 2)[1]
-   $image = "localhost:$pushPort/public/plugins/my-plugin:1.0.0"
+   $image = "localhost:$pushPort/staging/plugins/my-plugin:1.0.0"
    docker login "localhost:$pushPort" --username publisher
    docker build -t $image 'C:\path\to\plugin-source'
    docker push $image
    $accept = 'application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json'
-   $response = Invoke-WebRequest -Method Head -Uri "http://localhost:$publicPort/v2/public/plugins/my-plugin/manifests/1.0.0" -Headers @{ Accept = $accept }
+   $password = (Get-Content '.local-marketplace/zot-password.txt' -Raw).Trim()
+   $auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("publisher:$password"))
+   $response = Invoke-WebRequest -Method Head -Uri "http://localhost:$pushPort/v2/staging/plugins/my-plugin/manifests/1.0.0" -Headers @{ Accept = $accept; Authorization = "Basic $auth" }
    $mainRef = "localhost:$publicPort/public/plugins/my-plugin@$($response.Headers['Docker-Content-Digest'])"
    Write-Host "Use this image in manifest.json: $mainRef"
    ```
@@ -82,7 +84,7 @@ The local HTTP registry setup is for development only. Before publishing real pl
 
 ## Tests and builds
 
-Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting the publisher/admin/revocation token file paths and `MARKETPLACE_ZOT_TEST_PASSWORD`. Set `ARTIO_CORE_PATH` to a read-only pinned Core checkout only when running isolated runtime/controller contract tests; no deployed or customer Core instance is required. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+Run `./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` with JDK 25. The Gradle toolchain is pinned to Java 25 and the wrapper to Gradle 9.8.1. Run the live Docker suite with `./scripts/docker-acceptance.sh` after starting the stack and exporting the publisher/admin/revocation token file paths, `MARKETPLACE_ZOT_TEST_PASSWORD`, and `MARKETPLACE_ZOT_PROMOTION_TEST_PASSWORD`. The isolated Zot htpasswd must contain both the publisher and promoter accounts. Set `ARTIO_CORE_PATH` to a read-only pinned Core checkout only when running isolated runtime/controller contract tests; no deployed or customer Core instance is required. Acceptance results and unrun limits are tracked in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 ## First manual publication
 

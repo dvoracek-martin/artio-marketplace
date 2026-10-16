@@ -27,6 +27,7 @@ VALUES (
 SQL
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V2__release_moderation_and_semver.sql
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V3__two_party_release_publication.sql
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres < marketplace-infrastructure/src/main/resources/db/migration/V4__durable_oci_promotion_jobs.sql
 result=$(docker exec "$container" psql -At -U postgres -d postgres -c \
   "SELECT p.moderation_state || ':' || r.publication_state || ':' || r.revocation_category || ':' || r.revoked_by FROM marketplace_plugins p JOIN marketplace_releases r USING(plugin_id) WHERE p.plugin_id='legacy.plugin'")
 [[ $result == 'REVIEW_REQUIRED:REVOKED:LEGACY_UNKNOWN:legacy-migration' ]] || {
@@ -71,4 +72,4 @@ BEGIN
   END IF;
 END $$;
 SQL
-echo 'V1-V3 migration test passed: ambiguous revocation is quarantined, release history is attributed, SemVer order is numeric, and approval is reset after catalog mutation.'
+echo 'V1-V4 migration test passed: legacy state is quarantined, SemVer ordering and two-party approval are preserved, catalog edits reset approval, and durable OCI promotion jobs are available.'

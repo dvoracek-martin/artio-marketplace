@@ -19,6 +19,8 @@ public class PublicationReservationRecovery {
   @Scheduled(fixedDelayString = "${marketplace.publisher.recovery-interval-ms:60000}")
   @Transactional
   public void recoverExpiredReservations() {
+    jdbc.update(
+        "UPDATE publication_promotions SET state='RETRYABLE',last_error_code='PROMOTION_LEASE_EXPIRED',updated_at=now() WHERE state='PROMOTING' AND release_id IN (SELECT release_id FROM marketplace_releases WHERE publication_state='PUBLISHING' AND publishing_started_at < now() - interval '15 minutes')");
     int recovered =
         jdbc.update(
             "UPDATE marketplace_releases SET publication_state='VALIDATED',publishing_started_at=NULL,row_version=row_version+1 WHERE publication_state='PUBLISHING' AND publishing_started_at < now() - interval '15 minutes'");

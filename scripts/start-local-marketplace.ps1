@@ -68,6 +68,7 @@ if (-not (Test-Path -LiteralPath $envFile)) {
   $adminToken = New-RandomHex
   $revocationToken = New-RandomHex
   $zotPassword = New-RandomHex
+  $promotionPassword = New-RandomHex
   $usedPorts = [System.Collections.Generic.List[int]]::new()
   $apiPort = Find-FreeLoopbackPort 18080 $usedPorts.ToArray(); $usedPorts.Add($apiPort)
   $managementPort = Find-FreeLoopbackPort 18081 $usedPorts.ToArray(); $usedPorts.Add($managementPort)
@@ -77,11 +78,13 @@ if (-not (Test-Path -LiteralPath $envFile)) {
   $httpdImage = 'httpd:2.4-alpine'
   $httpdImageWasPresent = Test-DockerCommand "image inspect $httpdImage"
   try {
-    $zotEntry = $zotPassword | docker run --rm -i --entrypoint htpasswd $httpdImage -Bbn -C 12 -i publisher
-    if ($LASTEXITCODE -ne 0 -or -not $zotEntry -or $zotEntry -notmatch '^publisher:\$2[aby]\$') {
+    $zotPublisherEntry = $zotPassword | docker run --rm -i --entrypoint htpasswd $httpdImage -Bbn -C 12 -i publisher
+    $zotPromoterEntry = $promotionPassword | docker run --rm -i --entrypoint htpasswd $httpdImage -Bbn -C 12 -i promoter
+    if ($LASTEXITCODE -ne 0 -or -not $zotPublisherEntry -or $zotPublisherEntry -notmatch '^publisher:\$2[aby]\$' -or
+      -not $zotPromoterEntry -or $zotPromoterEntry -notmatch '^promoter:\$2[aby]\$') {
       throw 'Could not generate the Zot bcrypt password entry.'
     }
-    Write-Utf8File $htpasswdFile ($zotEntry.Trim() + "`n")
+    Write-Utf8File $htpasswdFile ($zotPublisherEntry.Trim() + "`n" + $zotPromoterEntry.Trim() + "`n")
   } finally {
     if (-not $httpdImageWasPresent) { Test-DockerCommand "image rm $httpdImage" | Out-Null }
   }
@@ -90,11 +93,13 @@ if (-not (Test-Path -LiteralPath $envFile)) {
   Write-Utf8File (Join-Path $stateDirectory 'admin-token.txt') ($adminToken + "`n")
   Write-Utf8File (Join-Path $stateDirectory 'revocation-token.txt') ($revocationToken + "`n")
   Write-Utf8File (Join-Path $stateDirectory 'zot-password.txt') ($zotPassword + "`n")
+  Write-Utf8File (Join-Path $stateDirectory 'zot-promotion-password.txt') ($promotionPassword + "`n")
   Write-Utf8File $credentialsFile @"
 Publisher API bearer token: publisher-token.txt
 Admin API bearer token: admin-token.txt
 Release revocation API bearer token: revocation-token.txt
 Zot Docker login password for user 'publisher': zot-password.txt
+Private OCI promotion credential is stored separately in zot-promotion-password.txt.
 
 These are local secrets. Do not share them or commit this folder.
 "@
@@ -103,6 +108,8 @@ These are local secrets. Do not share them or commit this folder.
     "MARKETPLACE_PUBLISHER_TOKEN_SHA256=$(Get-Sha256 $publisherToken)"
     "MARKETPLACE_ADMIN_TOKEN_SHA256=$(Get-Sha256 $adminToken)"
     "MARKETPLACE_REVOCATION_TOKEN_SHA256=$(Get-Sha256 $revocationToken)"
+    'MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter'
+    "MARKETPLACE_ZOT_PROMOTION_PASSWORD=$promotionPassword"
     "MARKETPLACE_REGISTRY_HOST=localhost:$registryPort"
     "MARKETPLACE_REGISTRY_PUBLISH_HOST=localhost:$registryPublishPort"
     "MARKETPLACE_API_PORT=$apiPort"
@@ -123,6 +130,35 @@ Publisher OCI registry: localhost:$registryPublishPort
 "@
 } elseif (-not (Test-Path -LiteralPath $htpasswdFile) -or -not (Test-Path -LiteralPath $credentialsFile)) {
   throw "Local configuration exists at $stateDirectory but is incomplete. Review that folder before removing it and starting again."
+}
+
+$promotionPasswordFile = Join-Path $stateDirectory 'zot-promotion-password.txt'
+$hasPromotionPassword = Select-String -LiteralPath $envFile -Pattern '^MARKETPLACE_ZOT_PROMOTION_PASSWORD=.+$' -Quiet
+$hasPromoter = Select-String -LiteralPath $htpasswdFile -Pattern '^promoter:\$2[aby]\$' -Quiet
+if (-not $hasPromotionPassword -or -not $hasPromoter) {
+  $promotionPassword = New-RandomHex
+  $httpdImage = 'httpd:2.4-alpine'
+  $httpdImageWasPresent = Test-DockerCommand "image inspect $httpdImage"
+  try {
+    $zotPromoterEntry = $promotionPassword | docker run --rm -i --entrypoint htpasswd $httpdImage -Bbn -C 12 -i promoter
+    if ($LASTEXITCODE -ne 0 -or -not $zotPromoterEntry -or $zotPromoterEntry -notmatch '^promoter:\$2[aby]\$') {
+      throw 'Could not generate the Zot promotion credential.'
+    }
+    $htpasswdEntries = @(Get-Content -LiteralPath $htpasswdFile | Where-Object { $_ -notmatch '^promoter:' })
+    $htpasswdEntries += $zotPromoterEntry.Trim()
+    Write-Utf8File $htpasswdFile (($htpasswdEntries -join "`n") + "`n")
+  } finally {
+    if (-not $httpdImageWasPresent) { Test-DockerCommand "image rm $httpdImage" | Out-Null }
+  }
+  $envContents = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -notmatch '^MARKETPLACE_ZOT_PROMOTION_(USERNAME|PASSWORD)=' })
+  $envContents += 'MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter'
+  $envContents += "MARKETPLACE_ZOT_PROMOTION_PASSWORD=$promotionPassword"
+  Write-Utf8File $envFile (($envContents -join "`n") + "`n")
+  Write-Utf8File $promotionPasswordFile ($promotionPassword + "`n")
+  $credentialText = Get-Content -Raw -LiteralPath $credentialsFile
+  if ($credentialText -notmatch 'zot-promotion-password\.txt') {
+    Write-Utf8File $credentialsFile ($credentialText.TrimEnd() + "`nPrivate OCI promotion credential: zot-promotion-password.txt`n")
+  }
 }
 
 Set-ComposeEnvironmentFromFile $envFile

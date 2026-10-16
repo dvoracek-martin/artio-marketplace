@@ -3,10 +3,14 @@ set -euo pipefail
 
 base=${MARKETPLACE_URL:-http://localhost:8080}
 registry=${MARKETPLACE_REGISTRY_HOST:-localhost:5000}
+registry_connect=${MARKETPLACE_REGISTRY_CONNECT_HOST:-$registry}
 publisher_registry=${MARKETPLACE_REGISTRY_PUBLISH_HOST:-localhost:5001}
+publisher_registry_connect=${MARKETPLACE_REGISTRY_PUBLISH_CONNECT_HOST:-$publisher_registry}
 example="$PWD/examples/reference-plugin"
 compose=(docker compose --project-name "${MARKETPLACE_COMPOSE_PROJECT:-deployment}" --env-file "${MARKETPLACE_ENV_FILE:-.env}" -f deployment/compose.yaml)
 package=$(mktemp -d "$PWD/.acceptance-tmp.XXXXXX")
+python=${MARKETPLACE_PYTHON:-python3}
+export PYTHON="$python"
 tags=()
 artifact_refs=()
 release_refs=()
@@ -32,7 +36,7 @@ trap cleanup EXIT
 : "${MARKETPLACE_REVOCATION_TOKEN_FILE:?Set the test revocation-token file path}"
 publisher_token=$(cat "$MARKETPLACE_PUBLISHER_TOKEN_FILE")
 admin_token=$(cat "$MARKETPLACE_ADMIN_TOKEN_FILE")
-python3 - <<'PY'
+"$python" - <<'PY'
 import json
 with open('deployment/zot/config.json', encoding='utf-8') as source:
     zot = json.load(source)
@@ -40,6 +44,11 @@ assert zot['storage']['gc'] is False, 'Zot automatic GC must remain disabled'
 actions = [action for repo in zot['http']['accessControl']['repositories'].values()
            for policy in repo.get('policies', []) for action in policy.get('actions', [])]
 assert 'delete' not in actions, 'publisher Zot policies must not grant delete'
+repositories = zot['http']['accessControl']['repositories']
+assert repositories['staging/**']['policies'][0]['users'] == ['publisher', 'promoter']
+assert repositories['public/**']['anonymousPolicy'] == ['read']
+assert repositories['public/**']['policies'][0]['users'] == ['promoter']
+assert '**' not in repositories, 'Unmatched repositories must default deny'
 PY
 
 management_base=${MARKETPLACE_MANAGEMENT_URL:-http://127.0.0.1:${MARKETPLACE_MANAGEMENT_PORT:-8081}}
@@ -54,47 +63,78 @@ wait_ready() {
 wait_ready
 echo 'Marketplace readiness passed.'
 
-v2_status=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$registry/v2/")
+v2_status=$(curl --silent --output /dev/null --write-out '%{http_code}' "http://$registry_connect/v2/")
 [[ $v2_status == 200 ]] || { echo "Anonymous Zot v2 check returned HTTP $v2_status" >&2; exit 1; }
-publisher_v2_status=$(curl --silent --dump-header "$package/publisher-ping.headers" --output /dev/null --write-out '%{http_code}' "http://$publisher_registry/v2/")
+publisher_v2_status=$(curl --silent --dump-header "$package/publisher-ping.headers" --output /dev/null --write-out '%{http_code}' "http://$publisher_registry_connect/v2/")
 [[ $publisher_v2_status == 200 || $publisher_v2_status == 401 ]] || { echo "Publisher Zot v2 ping returned HTTP $publisher_v2_status" >&2; exit 1; }
 grep -qi '^WWW-Authenticate: Basic' "$package/publisher-ping.headers" || { echo 'Publisher Zot endpoint did not advertise its Basic-auth challenge.' >&2; exit 1; }
-write_status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST "http://$registry/v2/public/plugins/anonymous-write/blobs/uploads/")
+write_status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST "http://$registry_connect/v2/public/plugins/anonymous-write/blobs/uploads/")
 [[ $write_status == 401 || $write_status == 403 ]] || { echo "Anonymous Zot write unexpectedly returned HTTP $write_status" >&2; exit 1; }
-echo 'Zot anonymous-read and write-denial checks passed.'
+public_write_status=$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST "http://$publisher_registry_connect/v2/public/plugins/anonymous-write/blobs/uploads/")
+[[ $public_write_status == 401 || $public_write_status == 403 ]] || { echo "Publisher endpoint exposed public writes (HTTP $public_write_status)" >&2; exit 1; }
+echo 'Zot public read-only ACL and anonymous write-denial checks passed.'
 
 zot_password=${MARKETPLACE_ZOT_TEST_PASSWORD:?Set the test Zot password for Docker login}
 printf '%s' "$zot_password" | docker login "$publisher_registry" --username publisher --password-stdin >/dev/null
+promotion_password=${MARKETPLACE_ZOT_PROMOTION_TEST_PASSWORD:?Set the isolated Zot promoter test password}
+[[ $promotion_password != "$zot_password" ]] || { echo 'Publisher and promotion credentials must be distinct.' >&2; exit 1; }
 export MARKETPLACE_PUBLISHER_TOKEN_FILE
 accept='application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json'
 
 resolve_digest() {
   local repository=$1 tag=$2
-  curl --fail --silent --show-error --head --header "Accept: $accept" \
-    "http://$registry/v2/$repository/manifests/$tag" |
+  curl --fail --silent --show-error --head --user "publisher:$zot_password" --header "Accept: $accept" \
+    "http://$publisher_registry_connect/v2/$repository/manifests/$tag" |
     awk 'BEGIN{IGNORECASE=1} /^Docker-Content-Digest:/ {gsub("\r", ""); print $2}'
 }
 
 for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
   runtime_version=1
   [[ $version == 1.3.0 ]] && runtime_version=2
-  main_tag="$publisher_registry/public/plugins/artio-reference:$version"
-  sidecar_tag="$publisher_registry/public/plugins/artio-reference-companion:$version"
+  main_tag="$publisher_registry/staging/plugins/artio-reference:$version"
+  sidecar_tag="$publisher_registry/staging/plugins/artio-reference-companion:$version"
   tags+=("$main_tag" "$sidecar_tag")
   docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$main_tag" "$example"
   docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$sidecar_tag" "$example"
   docker push "$main_tag" >/dev/null
   docker push "$sidecar_tag" >/dev/null
 
-  main_digest=$(resolve_digest public/plugins/artio-reference "$version")
-  sidecar_digest=$(resolve_digest public/plugins/artio-reference-companion "$version")
+  main_digest=$(resolve_digest staging/plugins/artio-reference "$version")
+  sidecar_digest=$(resolve_digest staging/plugins/artio-reference-companion "$version")
   [[ $main_digest =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "Missing main image digest for $version." >&2; exit 1; }
   [[ $sidecar_digest =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "Missing sidecar image digest for $version." >&2; exit 1; }
   if [[ $version == 1.2.0 ]]; then
     delete_status=$(curl --silent --output /dev/null --write-out '%{http_code}' -u "publisher:$zot_password" -X DELETE \
-      "http://$publisher_registry/v2/public/plugins/artio-reference/manifests/$main_digest")
+      "http://$publisher_registry_connect/v2/staging/plugins/artio-reference/manifests/$main_digest")
     [[ $delete_status == 403 || $delete_status == 405 ]] || { echo "Zot publisher delete was not denied (HTTP $delete_status)." >&2; exit 1; }
   fi
+  image_repositories=(artio-reference artio-reference-companion)
+  image_digests=("$main_digest" "$sidecar_digest")
+  for image_index in 0 1; do
+    image_repository=${image_repositories[$image_index]}
+    image_digest=${image_digests[$image_index]}
+    staged_manifest=$(curl --fail --silent --show-error --user "publisher:$zot_password" --header "Accept: $accept" \
+      "http://$publisher_registry_connect/v2/staging/plugins/$image_repository/manifests/$image_digest")
+    for endpoint in "$registry_connect" "$publisher_registry_connect"; do
+      staged_tag_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
+        "http://$endpoint/v2/staging/plugins/$image_repository/manifests/$version")
+      [[ $staged_tag_status != 200 ]] || { echo "Private staging tag was anonymously readable on $endpoint." >&2; exit 1; }
+      preapproval_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
+        "http://$endpoint/v2/public/plugins/$image_repository/manifests/$image_digest")
+      [[ $preapproval_status != 200 ]] || { echo "Unapproved staged artifact was publicly readable on $endpoint." >&2; exit 1; }
+      for blob_digest in $("$python" -c 'import json,sys; m=json.load(sys.stdin); print(m["config"]["digest"], *(x["digest"] for x in m["layers"]))' <<<"$staged_manifest"); do
+        blob_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          "http://$endpoint/v2/public/plugins/$image_repository/blobs/$blob_digest")
+        [[ $blob_status != 200 ]] || { echo "Unapproved staged blob was anonymously readable on $endpoint." >&2; exit 1; }
+      done
+      private_read_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
+        "http://$endpoint/v2/staging/plugins/$image_repository/manifests/$image_digest")
+      [[ $private_read_status != 200 ]] || { echo "Private staging digest was anonymously readable on $endpoint." >&2; exit 1; }
+    done
+  done
+  publisher_public_write=$(curl --silent --output /dev/null --write-out '%{http_code}' --user "publisher:$zot_password" -X POST \
+    "http://$publisher_registry_connect/v2/public/plugins/publisher-write-check/blobs/uploads/")
+  [[ $publisher_public_write == 401 || $publisher_public_write == 403 ]] || { echo "Publisher can write public OCI namespace (HTTP $publisher_public_write)." >&2; exit 1; }
   main_ref="$registry/public/plugins/artio-reference@$main_digest"
   sidecar_ref="$registry/public/plugins/artio-reference-companion@$sidecar_digest"
   tags+=("$main_ref" "$sidecar_ref")
@@ -167,7 +207,7 @@ JSON
   printf '%s\n' "$publish_output"
   ./scripts/publish-plugin.sh "$release_dir" "$base"
   staged_release_id=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1)
-  python3 - "$base" "$staged_release_id" "$publisher_token" "$admin_token" <<'PY'
+  "$python" - "$base" "$staged_release_id" "$publisher_token" "$admin_token" <<'PY'
 import json, sys, urllib.error, urllib.request
 base, release_id, publisher, admin = sys.argv[1:]
 root = '/api/v1/admin/marketplace/releases/' + release_id
@@ -213,16 +253,16 @@ PY
   curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/manifest$prerelease_query" >/dev/null
 done
 old_main_ref="$registry/public/plugins/artio-reference@$main_digest_120"
-main_tag_120="$publisher_registry/public/plugins/artio-reference:1.2.0"
+main_tag_120="$publisher_registry/staging/plugins/artio-reference:1.2.0"
 docker tag "$publisher_registry/public/plugins/artio-reference:1.3.0" "$main_tag_120"
 docker push "$main_tag_120" >/dev/null
-overwritten_digest=$(resolve_digest public/plugins/artio-reference 1.2.0)
+overwritten_digest=$(resolve_digest staging/plugins/artio-reference 1.2.0)
 [[ $overwritten_digest =~ ^sha256:[a-f0-9]{64}$ && $overwritten_digest != "$main_digest_120" ]] || {
   echo 'Overwriting a Zot tag did not produce a new manifest digest.' >&2
   exit 1
 }
-curl --fail --silent --show-error --head --header "Accept: $accept" \
-  "http://$registry/v2/public/plugins/artio-reference/manifests/$main_digest_120" >/dev/null
+curl --fail --silent --show-error --head --user "publisher:$zot_password" --header "Accept: $accept" \
+  "http://$publisher_registry_connect/v2/staging/plugins/artio-reference/manifests/$main_digest_120" >/dev/null
 docker image rm "$old_main_ref" >/dev/null
 docker pull "$old_main_ref" >/dev/null
 echo 'Zot retained the previous manifest and image after its mutable tag was overwritten.'
@@ -235,7 +275,7 @@ for version in 1.2.0 1.3.0; do
   curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/manifest" >/dev/null
 done
 curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference?locale=de" | grep -q 'Artio Referenzerweiterung'
-python3 - "$base" <<'PY'
+"$python" - "$base" <<'PY'
 import json, sys, urllib.request
 base = sys.argv[1]
 def get(path):
@@ -260,7 +300,7 @@ assert preview_card['content'][0]['version'] == '1.4.0-rc.1'
 PY
 echo 'SemVer release selection checks passed.'
 revocation_token=$(cat "$MARKETPLACE_REVOCATION_TOKEN_FILE")
-python3 - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
+"$python" - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
 import json, sys, urllib.error, urllib.request
 base, publisher, admin, release_id = sys.argv[1:]
 def request(path, method='GET', token=publisher, payload=None):
@@ -294,7 +334,7 @@ curl --fail --silent -X POST -H "Authorization: Bearer $admin_token" -H 'Content
 suspended_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0")
 [[ $suspended_status == 404 ]] || { echo 'Suspended plugin remained recommended.' >&2; exit 1; }
-python3 - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
+"$python" - "$base" "$publisher_token" "$admin_token" "$release_id_120" <<'PY'
 import json, sys, urllib.error, urllib.request
 base, token, admin, source_id = sys.argv[1:]
 def request(path, method='GET', payload=None, key=None, credential=token):
@@ -338,7 +378,7 @@ if [[ -n $release_id_129 ]]; then
   revoked_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
     "$base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.9/manifest")
   [[ $revoked_status == 410 ]] || { echo 'Revoked release did not return HTTP 410.' >&2; exit 1; }
-  [[ $(curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0" | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])') == 1.3.0 ]] || { echo 'Revoking an older release affected the latest release.' >&2; exit 1; }
+  [[ $(curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0" | "$python" -c 'import json,sys;print(json.load(sys.stdin)["version"])') == 1.3.0 ]] || { echo 'Revoking an older release affected the latest release.' >&2; exit 1; }
 fi
 echo 'Moderation, release-scoped revocation and catalog checks passed.'
 if ((${#tags[@]})); then docker image rm "${tags[@]}" >/dev/null 2>&1 || true; fi

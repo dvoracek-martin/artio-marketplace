@@ -2,6 +2,7 @@ package io.artio.marketplace.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.artio.marketplace.application.ArtifactPromoter;
 import io.artio.marketplace.application.ArtifactVerifier;
 import io.artio.marketplace.domain.ModerationState;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +35,7 @@ public class PublisherController {
   private final ObjectMapper mapper;
   private final ManifestRules rules;
   private final ArtifactVerifier artifacts;
+  private final ArtifactPromoter promoter;
   private final io.artio.marketplace.infrastructure.MediaStore media;
   private final org.springframework.transaction.support.TransactionTemplate transactions;
   private final String publisherTokenHash;
@@ -45,6 +47,7 @@ public class PublisherController {
       ObjectMapper mapper,
       ManifestRules rules,
       ArtifactVerifier artifacts,
+      ArtifactPromoter promoter,
       io.artio.marketplace.infrastructure.MediaStore media,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${marketplace.publisher.token-sha256:}") String publisherTokenHash,
@@ -54,6 +57,7 @@ public class PublisherController {
     this.mapper = mapper;
     this.rules = rules;
     this.artifacts = artifacts;
+    this.promoter = promoter;
     this.media = media;
     this.transactions =
         new org.springframework.transaction.support.TransactionTemplate(transactionManager);
@@ -362,11 +366,20 @@ public class PublisherController {
     if (!"ACTIVE".equals(r.get("moderation")))
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Plugin moderation blocks publication");
-    int reserved =
-        jdbc.update(
-            "UPDATE marketplace_releases SET publication_state='PUBLISHING',publishing_started_at=now(),row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND publication_approval_state='APPROVED' AND approved_manifest_sha256=manifest_sha256 AND approved_catalog_sha256=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
-            releaseId,
-            sha(r.get("metadata")));
+    Integer reserved =
+        transactions.execute(
+            status -> {
+              int changed =
+                  jdbc.update(
+                      "UPDATE marketplace_releases SET publication_state='PUBLISHING',publishing_started_at=now(),row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND publication_approval_state='APPROVED' AND approved_manifest_sha256=manifest_sha256 AND approved_catalog_sha256=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
+                      releaseId,
+                      sha(r.get("metadata")));
+              if (changed == 1)
+                jdbc.update(
+                    "INSERT INTO publication_promotions(release_id,state,attempt_count,started_at,updated_at) VALUES (?::uuid,'PROMOTING',1,now(),now()) ON CONFLICT(release_id) DO UPDATE SET state='PROMOTING',attempt_count=publication_promotions.attempt_count+1,started_at=now(),completed_at=NULL,last_error_code=NULL,updated_at=now()",
+                    releaseId);
+              return changed;
+            });
     if (reserved != 1)
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release or plugin moderation changed; retry");
@@ -391,6 +404,20 @@ public class PublisherController {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, String.join("; ", artifactErrors));
     }
+    try {
+      promoter.promote(reservedRow.get("manifest"));
+      artifactErrors = artifacts.verifyPublished(rules.registryHost(), reservedRow.get("manifest"));
+    } catch (RuntimeException failure) {
+      releaseReservation(releaseId, reservationVersion);
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Approved OCI promotion failed; retry is safe", failure);
+    }
+    if (!artifactErrors.isEmpty()) {
+      releaseReservation(releaseId, reservationVersion);
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Public OCI verification failed: " + String.join("; ", artifactErrors));
+    }
     JsonNode metadata = parse(r.get("metadata"));
     if (!assetExists(metadata.path("icon").asText())) {
       releaseReservation(releaseId, reservationVersion);
@@ -414,8 +441,15 @@ public class PublisherController {
                         releaseId,
                         reservationVersion,
                         sha(r.get("metadata")));
-                if (changed == 1)
+                if (changed == 1) {
+                  int promotionUpdated =
+                      jdbc.update(
+                          "UPDATE publication_promotions SET state='PUBLISHED',completed_at=now(),last_error_code=NULL,updated_at=now() WHERE release_id=?::uuid AND state='PROMOTING'",
+                          releaseId);
+                  if (promotionUpdated != 1)
+                    throw new IllegalStateException("Durable OCI promotion job is missing");
                   audit("PUBLISH", r.get("pluginId") + "@" + r.get("version"), "OK");
+                }
                 return changed;
               });
     } catch (RuntimeException failure) {
@@ -445,6 +479,9 @@ public class PublisherController {
         "UPDATE marketplace_releases SET publication_state='VALIDATED',publishing_started_at=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='PUBLISHING' AND row_version=?",
         releaseId,
         reservationVersion);
+    jdbc.update(
+        "UPDATE publication_promotions SET state='RETRYABLE',completed_at=NULL,last_error_code='PROMOTION_INCOMPLETE',updated_at=now() WHERE release_id=?::uuid AND state='PROMOTING'",
+        releaseId);
   }
 
   @PostMapping("/releases/{releaseId}/unlist")

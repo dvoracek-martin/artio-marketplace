@@ -31,6 +31,7 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
           "application/vnd.docker.distribution.manifest.list.v2+json");
   private final String expectedHost;
   private final URI zotBase;
+  private final String authorization;
   private final List<String> allowedRepositoryPrefixes;
   private final HttpClient http =
       HttpClient.newBuilder()
@@ -43,13 +44,16 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
       @Value("${marketplace.registry.public-host:localhost:5000}") String expectedHost,
       @Value("${marketplace.registry.internal-url:http://zot:5000}") URI zotBase,
       @Value("${marketplace.registry.allowed-repository-prefixes:public/plugins/}")
-          String allowedPrefixes) {
+          String allowedPrefixes,
+      @Value("${marketplace.registry.promotion-username:promoter}") String promotionUsername,
+      @Value("${marketplace.registry.promotion-password:}") String promotionPassword) {
     if (zotBase.getUserInfo() != null
         || zotBase.getHost() == null
         || !Set.of("http", "https").contains(zotBase.getScheme()))
       throw new IllegalArgumentException("Invalid configured Zot endpoint");
     this.expectedHost = expectedHost.toLowerCase(java.util.Locale.ROOT);
     this.zotBase = zotBase;
+    this.authorization = basicAuthorization(promotionUsername, promotionPassword);
     this.allowedRepositoryPrefixes =
         java.util.Arrays.stream(allowedPrefixes.split(","))
             .map(String::trim)
@@ -63,12 +67,21 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
 
   @Override
   public List<String> verify(String registryHost, String manifestJson) {
+    return verify(registryHost, manifestJson, true);
+  }
+
+  @Override
+  public List<String> verifyPublished(String registryHost, String manifestJson) {
+    return verify(registryHost, manifestJson, false);
+  }
+
+  private List<String> verify(String registryHost, String manifestJson, boolean staged) {
     List<String> errors = new ArrayList<>();
     try {
       JsonNode root = mapper.readTree(manifestJson);
       JsonNode packageManifest =
           root.path("packageManifest").isObject() ? root.path("packageManifest") : root;
-      check(packageManifest.path("image").asText(null), registryHost, "image", errors);
+      check(packageManifest.path("image").asText(null), registryHost, "image", errors, staged);
       JsonNode services = packageManifest.path("services");
       if (services.isArray())
         for (int i = 0; i < services.size(); i++)
@@ -76,14 +89,16 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
               services.get(i).path("image").asText(null),
               registryHost,
               "services[" + i + "].image",
-              errors);
+              errors,
+              staged);
     } catch (Exception e) {
       errors.add("manifest could not be inspected");
     }
     return List.copyOf(errors);
   }
 
-  private void check(String reference, String requestedHost, String field, List<String> errors) {
+  private void check(
+      String reference, String requestedHost, String field, List<String> errors, boolean staged) {
     var match = REF.matcher(reference == null ? "" : reference);
     if (!match.matches()) {
       errors.add(field + " must use a lowercase sha256 digest reference");
@@ -105,18 +120,33 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
       errors.add(field + " registry is not the configured public registry");
       return;
     }
-    if (allowedRepositoryPrefixes.stream().noneMatch(repo::startsWith)) {
+    String checkedRepository = staged ? stagingRepository(repo) : repo;
+    if (checkedRepository == null
+        || allowedRepositoryPrefixes.stream()
+            .noneMatch(prefix -> checkedRepository.startsWith(prefixFor(prefix, staged)))) {
       errors.add(field + " OCI repository is outside the approved repository prefixes");
       return;
     }
     try {
-      verifyManifest(repo, digest, field, errors, 0);
+      verifyManifest(checkedRepository, digest, field, errors, 0);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       errors.add(field + " registry check was interrupted");
     } catch (Exception e) {
       errors.add(field + " registry could not be reached");
     }
+  }
+
+  private static String stagingRepository(String publicRepository) {
+    if (!publicRepository.startsWith("public/")) return null;
+    return "staging/" + publicRepository.substring("public/".length());
+  }
+
+  private static String prefixFor(String configuredPrefix, boolean staged) {
+    if (!staged) return configuredPrefix;
+    return configuredPrefix.startsWith("public/")
+        ? "staging/" + configuredPrefix.substring("public/".length())
+        : configuredPrefix;
   }
 
   private void verifyManifest(
@@ -127,12 +157,10 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
       return;
     }
     URI uri = zotBase.resolve("/v2/" + repository + "/manifests/" + digest);
-    HttpRequest request =
-        HttpRequest.newBuilder(uri)
-            .timeout(Duration.ofSeconds(8))
-            .header("Accept", ACCEPT)
-            .GET()
-            .build();
+    var builder =
+        HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(8)).header("Accept", ACCEPT);
+    if (!authorization.isBlank()) builder.header("Authorization", authorization);
+    HttpRequest request = builder.GET().build();
     var response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
     if (response.statusCode() != 200) {
       errors.add(field + " OCI digest is unavailable (HTTP " + response.statusCode() + ")");
@@ -169,5 +197,13 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
     } else if (!manifest.path("config").isObject() || !manifest.path("layers").isArray()) {
       errors.add(field + " is not a supported OCI or Docker image manifest");
     }
+  }
+
+  private static String basicAuthorization(String username, String password) {
+    if (username == null || username.isBlank() || password == null || password.isBlank()) return "";
+    return "Basic "
+        + java.util.Base64.getEncoder()
+            .encodeToString(
+                (username + ":" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 }

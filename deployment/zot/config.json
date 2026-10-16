@@ -16,15 +16,15 @@
     },
     "accessControl": {
       "repositories": {
+        "staging/**": {
+          "policies": [
+            { "users": ["publisher", "promoter"], "actions": ["read", "create", "update"] }
+          ]
+        },
         "public/**": {
           "anonymousPolicy": ["read"],
           "policies": [
-            { "users": ["publisher"], "actions": ["read", "create", "update"] }
-          ]
-        },
-        "**": {
-          "policies": [
-            { "users": ["publisher"], "actions": ["read", "create", "update"] }
+            { "users": ["promoter"], "actions": ["read", "create", "update"] }
           ]
         }
       }

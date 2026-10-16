@@ -70,6 +70,8 @@ marketplace:
     public-host: ${MARKETPLACE_REGISTRY_HOST:localhost:5000}
     allowed-repository-prefixes: ${MARKETPLACE_REGISTRY_ALLOWED_REPOSITORY_PREFIXES:public/plugins/}
     internal-url: ${MARKETPLACE_ZOT_URL:http://localhost:5000}
+    promotion-username: ${MARKETPLACE_ZOT_PROMOTION_USERNAME:promoter}
+    promotion-password: ${MARKETPLACE_ZOT_PROMOTION_PASSWORD:}
     binary: ${MARKETPLACE_ZOT_BINARY:}
     config: ${MARKETPLACE_ZOT_CONFIG:/etc/zot/config.json}
   publisher:

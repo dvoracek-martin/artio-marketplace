@@ -36,6 +36,17 @@ class ZotArtifactVerifierTest {
 
     registry = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     registry.createContext(
+        "/v2/staging/plugins/example/manifests/" + imageDigest,
+        exchange -> {
+          exchange.getResponseHeaders().add("Docker-Content-Digest", imageDigest);
+          exchange
+              .getResponseHeaders()
+              .add("Content-Type", "application/vnd.oci.image.manifest.v1+json");
+          exchange.sendResponseHeaders(200, imageManifest.length);
+          exchange.getResponseBody().write(imageManifest);
+          exchange.close();
+        });
+    registry.createContext(
         "/v2/public/plugins/example/manifests/" + imageDigest,
         exchange -> {
           exchange.getResponseHeaders().add("Docker-Content-Digest", imageDigest);
@@ -51,7 +62,9 @@ class ZotArtifactVerifierTest {
         new ZotArtifactVerifier(
             "localhost:5000",
             URI.create("http://127.0.0.1:" + registry.getAddress().getPort()),
-            "public/plugins/");
+            "public/plugins/",
+            "promoter",
+            "test-only-password");
   }
 
   @AfterEach
@@ -70,6 +83,7 @@ class ZotArtifactVerifierTest {
                     .formatted(imageReference, imageReference));
 
     assertTrue(verifier.verify("localhost:5000", manifest.toString()).isEmpty());
+    assertTrue(verifier.verifyPublished("localhost:5000", manifest.toString()).isEmpty());
   }
 
   @Test

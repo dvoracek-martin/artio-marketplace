@@ -2,7 +2,7 @@
 
 ## 1. Prepare and push OCI artifacts
 
-Create a Zot publisher account named `publisher` in the bcrypt htpasswd file mounted at `/run/secrets/zot_htpasswd`. Use Docker or another OCI client to log in with that account's password and push images through the publisher endpoint. Resolve each artifact's digest from the public registry endpoint and use a reference at that public host in `manifest.json`. The manifest `image` and each `services[].image` must use exactly the configured `MARKETPLACE_REGISTRY_HOST`; tags and the publisher hostname are not accepted. Do not put credentials or arbitrary registry URLs in a manifest.
+Create separate Zot accounts named `publisher` and `promoter` in the bcrypt htpasswd file mounted at `/run/secrets/zot_htpasswd`. The publisher can read/write only `staging/**`; it cannot read staging anonymously, write to `public/**`, or delete artifacts. The promoter is a separate server-side credential with read access to staging and write access to public artifacts. It must never be given to plugin authors. Resolve image digests from private staging, but keep the canonical public registry path in the manifest. Marketplace copies only the exact reviewed digest bundle to public after separate admin approval and exposes the release in its catalog only after every public manifest has been verified.
 
 For manual local Compose setup, public pulls use `localhost:5000` and authenticated publishing uses `localhost:5001`. The Windows [`Start Marketplace.bat`](../Start%20Marketplace.bat) starter may select different free host ports; read `.local-marketplace/connection.txt` and use those actual values in the commands below and in manifest digests. Remote publishers use a separate operator-configured publisher DNS hostname, such as `registry-push.example.com`; restrict that host at the reverse proxy/firewall to trusted operator networks. Both names route to the same Zot repository storage. The public hostname is what goes into plugin manifests and Artio Core's `ARTIO_EXTENSION_TRUSTED_REGISTRIES`. Local development uses HTTP and loopback only; configure the local Docker daemon to trust both localhost ports as insecure registries. Production must use HTTPS.
 
@@ -10,10 +10,12 @@ For a local build, log in interactively so Docker prompts for the Zot password; 
 
 ```powershell
 docker login localhost:5001 --username publisher
-docker build -t localhost:5001/public/plugins/stock-sync:1.0.0 .
-docker push localhost:5001/public/plugins/stock-sync:1.0.0
+docker build -t localhost:5001/staging/plugins/stock-sync:1.0.0 .
+docker push localhost:5001/staging/plugins/stock-sync:1.0.0
 $accept = 'application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json'
-$response = Invoke-WebRequest -Method Head -Uri 'http://localhost:5000/v2/public/plugins/stock-sync/manifests/1.0.0' -Headers @{Accept=$accept}
+$password = (Get-Content '.local-marketplace/zot-password.txt' -Raw).Trim()
+$auth = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("publisher:$password"))
+$response = Invoke-WebRequest -Method Head -Uri 'http://localhost:5001/v2/staging/plugins/stock-sync/manifests/1.0.0' -Headers @{Accept=$accept; Authorization="Basic $auth"}
 $mainRef = "localhost:5000/public/plugins/stock-sync@$($response.Headers['Docker-Content-Digest'])"
 ```
 

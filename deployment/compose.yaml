@@ -26,6 +26,8 @@ services:
       MARKETPLACE_ZOT_URL: http://127.0.0.1:5000
       MARKETPLACE_ZOT_BINARY: /usr/local/bin/zot
       MARKETPLACE_ZOT_CONFIG: /etc/zot/config.json
+      MARKETPLACE_ZOT_PROMOTION_USERNAME: ${MARKETPLACE_ZOT_PROMOTION_USERNAME:-promoter}
+      MARKETPLACE_ZOT_PROMOTION_PASSWORD: ${MARKETPLACE_ZOT_PROMOTION_PASSWORD:?Set a unique Zot promotion password in .env}
       MARKETPLACE_MEDIA_ROOT: /var/lib/artio-marketplace/assets
     volumes:
       - zot_data:/var/lib/zot
