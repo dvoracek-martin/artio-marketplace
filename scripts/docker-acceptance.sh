@@ -281,7 +281,7 @@ PY
 done
 old_main_ref="$registry/public/plugins/artio-reference@$main_digest_120"
 main_tag_120="$publisher_registry/staging/plugins/artio-reference:1.2.0"
-docker tag "$publisher_registry/public/plugins/artio-reference:1.3.0" "$main_tag_120"
+docker tag "$publisher_registry/staging/plugins/artio-reference:1.3.0" "$main_tag_120"
 docker push "$main_tag_120" >/dev/null
 overwritten_digest=$(resolve_digest staging/plugins/artio-reference 1.2.0)
 [[ $overwritten_digest =~ ^sha256:[a-f0-9]{64}$ && $overwritten_digest != "$main_digest_120" ]] || {
