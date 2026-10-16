@@ -164,9 +164,11 @@ jobs:
       - name: Stop ephemeral acceptance stack
         if: always()
         run: |
-          if [ -f .env ]; then
-            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml down -v
-          else
-            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" -f deployment/compose.yaml down -v
-          fi
+          POSTGRES_PASSWORD=ci-cleanup-only \
+          MARKETPLACE_PUBLISHER_TOKEN_SHA256=ci-cleanup-only \
+          MARKETPLACE_ADMIN_TOKEN_SHA256=ci-cleanup-only \
+          MARKETPLACE_REVOCATION_TOKEN_SHA256=ci-cleanup-only \
+          MARKETPLACE_ZOT_PROMOTION_PASSWORD=ci-cleanup-only \
+          ZOT_HTPASSWD_FILE=/tmp/ci-cleanup-only-htpasswd \
+            docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file /dev/null -f deployment/compose.yaml down -v --remove-orphans
 

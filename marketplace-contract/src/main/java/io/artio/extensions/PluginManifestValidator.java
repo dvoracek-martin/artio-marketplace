@@ -47,7 +47,9 @@ public final class PluginManifestValidator {
   }
 
   private List<String> validate(
-      PluginManifest manifest, String coreVersion, Set<String> installedPluginIds,
+      PluginManifest manifest,
+      String coreVersion,
+      Set<String> installedPluginIds,
       boolean allowV2Properties) {
     List<String> errors = new ArrayList<>();
     if (!(allowV2Properties ? "2" : "1").equals(manifest.manifestVersion()))
@@ -101,9 +103,14 @@ public final class PluginManifestValidator {
     if (manifest.configuration().size() > 100)
       errors.add("configuration schema exceeds 100 fields");
     manifest.configuration().forEach((key, field) -> validateField(key, field, errors));
-    if (!allowV2Properties && manifest.configuration().values().stream()
-        .anyMatch(field -> field != null && (field.generated() || field.generatedLength() != null
-            || field.generatedRotationGroup() != null)))
+    if (!allowV2Properties
+        && manifest.configuration().values().stream()
+            .anyMatch(
+                field ->
+                    field != null
+                        && (field.generated()
+                            || field.generatedLength() != null
+                            || field.generatedRotationGroup() != null)))
       errors.add("generated configuration secrets require manifest v2");
     validateConfigurationBindings(
         manifest.configurationBindings(), manifest.configuration(), "primary service", errors);
@@ -130,9 +137,12 @@ public final class PluginManifestValidator {
       if (!allowV2Properties && (service.beforePrimary() || service.runToCompletion()))
         errors.add("bundle service lifecycle options require manifest v2");
       if (service.runToCompletion()) {
-        if (service.port() != 0 || service.healthPath() != null
-            || !service.persistentPaths().isEmpty() || !service.internalPorts().isEmpty())
-          errors.add("one-shot bundle services must not declare ports, health probes or persistent volumes");
+        if (service.port() != 0
+            || service.healthPath() != null
+            || !service.persistentPaths().isEmpty()
+            || !service.internalPorts().isEmpty())
+          errors.add(
+              "one-shot bundle services must not declare ports, health probes or persistent volumes");
       } else {
         if (service.port() < 1 || service.port() > 65535)
           errors.add("bundle service port must be between 1 and 65535");
@@ -211,18 +221,32 @@ public final class PluginManifestValidator {
             source.configurationBindings());
     List<String> errors =
         new ArrayList<>(validate(packageMetadata, coreVersion, installedPluginIds, true));
-    source.configuration().forEach((key, field) -> {
-      if (field != null && field.generated() && (!field.secret() || !"secret".equals(field.type())
-          || !field.required() || field.generatedLength() == null
-          || field.generatedLength() < 16 || field.generatedLength() > 64))
-        errors.add("generated configuration secrets must be required secrets with a generated length from 16 to 64: " + key);
-      if (field != null && !field.generated() && field.generatedLength() != null)
-        errors.add("generatedLength requires a generated secret field: " + key);
-      if (field != null && field.generatedRotationGroup() != null
-          && (!field.generated() || !field.secret()
-              || !field.generatedRotationGroup().matches("[a-z][a-z0-9._-]{0,31}")))
-        errors.add("generatedRotationGroup requires a generated secret and a valid group name: " + key);
-    });
+    source
+        .configuration()
+        .forEach(
+            (key, field) -> {
+              if (field != null
+                  && field.generated()
+                  && (!field.secret()
+                      || !"secret".equals(field.type())
+                      || !field.required()
+                      || field.generatedLength() == null
+                      || field.generatedLength() < 16
+                      || field.generatedLength() > 64))
+                errors.add(
+                    "generated configuration secrets must be required secrets with a generated length from 16 to 64: "
+                        + key);
+              if (field != null && !field.generated() && field.generatedLength() != null)
+                errors.add("generatedLength requires a generated secret field: " + key);
+              if (field != null
+                  && field.generatedRotationGroup() != null
+                  && (!field.generated()
+                      || !field.secret()
+                      || !field.generatedRotationGroup().matches("[a-z][a-z0-9._-]{0,31}")))
+                errors.add(
+                    "generatedRotationGroup requires a generated secret and a valid group name: "
+                        + key);
+            });
     if (!source.extensionPoints().isEmpty())
       errors.add("v2 manifests must declare capabilities instead of legacy extensionPoints");
     if (!source.permissions().isEmpty())
@@ -274,14 +298,22 @@ public final class PluginManifestValidator {
   private static boolean hasPrimaryDependencyCycle(List<PluginManifest.BundleService> services) {
     var nonNullServices = services.stream().filter(java.util.Objects::nonNull).toList();
     var dependencies = new java.util.HashMap<String, Set<String>>();
-    dependencies.put("main", nonNullServices.stream().filter(PluginManifest.BundleService::beforePrimary)
-        .map(PluginManifest.BundleService::id).collect(java.util.stream.Collectors.toSet()));
-    nonNullServices.forEach(service -> dependencies.put(service.id(), new HashSet<>(service.dependsOn())));
+    dependencies.put(
+        "main",
+        nonNullServices.stream()
+            .filter(PluginManifest.BundleService::beforePrimary)
+            .map(PluginManifest.BundleService::id)
+            .collect(java.util.stream.Collectors.toSet()));
+    nonNullServices.forEach(
+        service -> dependencies.put(service.id(), new HashSet<>(service.dependsOn())));
     return dependencyCycle("main", dependencies, new HashSet<>(), new HashSet<>());
   }
 
-  private static boolean dependencyCycle(String id, java.util.Map<String, Set<String>> dependencies,
-      Set<String> visited, Set<String> visiting) {
+  private static boolean dependencyCycle(
+      String id,
+      java.util.Map<String, Set<String>> dependencies,
+      Set<String> visited,
+      Set<String> visiting) {
     if (visited.contains(id)) return false;
     if (!visiting.add(id)) return true;
     for (String dependency : dependencies.getOrDefault(id, Set.of())) {

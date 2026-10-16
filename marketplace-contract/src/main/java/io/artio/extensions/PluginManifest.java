@@ -256,8 +256,18 @@ public record PluginManifest(
         List<String> persistentPaths,
         List<Integer> internalPorts,
         Integer memoryLimitMb) {
-      this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths,
-          internalPorts, memoryLimitMb, false, false);
+      this(
+          id,
+          image,
+          port,
+          healthPath,
+          configurationBindings,
+          dependsOn,
+          persistentPaths,
+          internalPorts,
+          memoryLimitMb,
+          false,
+          false);
     }
 
     public BundleService(
@@ -389,8 +399,21 @@ public record PluginManifest(
         Integer maximumLength,
         Double minimum,
         Double maximum) {
-      this(type, required, secret, label, description, format, options, minimumLength,
-          maximumLength, minimum, maximum, false, null, null);
+      this(
+          type,
+          required,
+          secret,
+          label,
+          description,
+          format,
+          options,
+          minimumLength,
+          maximumLength,
+          minimum,
+          maximum,
+          false,
+          null,
+          null);
     }
 
     public ConfigField(
@@ -407,8 +430,21 @@ public record PluginManifest(
         Double maximum,
         boolean generated,
         Integer generatedLength) {
-      this(type, required, secret, label, description, format, options, minimumLength,
-          maximumLength, minimum, maximum, generated, generatedLength, null);
+      this(
+          type,
+          required,
+          secret,
+          label,
+          description,
+          format,
+          options,
+          minimumLength,
+          maximumLength,
+          minimum,
+          maximum,
+          generated,
+          generatedLength,
+          null);
     }
   }
 }
