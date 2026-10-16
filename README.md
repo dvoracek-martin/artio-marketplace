@@ -40,7 +40,7 @@ For internet-facing deployment, do not expose these local Compose ports directly
 
 ## Publish a plugin
 
-There is no graphical backoffice. Plugin staging, approval, publication, and moderation use the versioned REST API and the included scripts. The public catalog is also API-only; see [OpenAPI](marketplace-contract/openapi.yaml). Payments and licensing are not implemented.
+Marketplace itself has no graphical backoffice: plugin staging, approval, publication, and moderation use the versioned REST API and the included scripts. The public catalog is also API-only; see [OpenAPI](marketplace-contract/openapi.yaml). Zot does have an optional registry UI ([upstream project](https://github.com/project-zot/zui)), but it is disabled in this deployment (`extensions.ui.enable: false` in [`deployment/zot/config.json`](deployment/zot/config.json)). If enabled, it would provide a UI for browsing the OCI registry, not Marketplace plugin publication or moderation. Payments and licensing are not implemented.
 
 1. Prepare a plugin package containing `manifest.json`, `catalog.json`, and the referenced icon/screenshots. Its runtime images (including sidecars) must be built and pushed to Zot first. The manifest must reference the public registry address with an immutable `@sha256:...` digest.
 2. Push the image to the publisher registry. For a one-click local stack, configure the two `localhost` registry ports listed in `.local-marketplace/connection.txt` as insecure registries in Docker Desktop (**Settings → Docker Engine**; add them to any existing configuration and apply/restart). Then read the selected ports and push the image:
