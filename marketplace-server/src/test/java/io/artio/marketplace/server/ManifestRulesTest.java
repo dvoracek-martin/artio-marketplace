@@ -91,6 +91,51 @@ class ManifestRulesTest {
   }
 
   @Test
+  void acceptsGeneratedSecretFieldsAndDependencyOrderedOneShotJobsInV2() throws Exception {
+    var manifest = v2Manifest("capability.payment-test");
+    var packageManifest = (com.fasterxml.jackson.databind.node.ObjectNode) manifest.path("packageManifest");
+    packageManifest.with("configuration").putObject("runtimeSecret")
+        .put("type", "secret").put("required", true).put("secret", true)
+        .put("generated", true).put("generatedLength", 32).put("generatedRotationGroup", "runtime")
+        .put("label", "Runtime secret");
+    packageManifest.set("services", mapper.readTree("""
+        [
+          {"id":"minio","image":"%s","port":9000,"healthPath":"/minio/health/ready",
+           "beforePrimary":true,"persistentPaths":["/var/lib/minio/data"]},
+          {"id":"provision","image":"%s","port":0,"healthPath":null,
+           "beforePrimary":true,"runToCompletion":true,"dependsOn":["minio"]}
+        ]
+        """.formatted(image("minio"), image("minio-provisioner"))));
+
+    var result = rules.validate(manifest, catalog("capability.payment-test"));
+
+    assertTrue(result.valid(), "v2 generated-secret/job manifest rejected: " + result.errors());
+    assertTrue(result.manifest().configuration().get("runtimeSecret").generated());
+    assertEquals(32, result.manifest().configuration().get("runtimeSecret").generatedLength());
+    assertEquals("runtime", result.manifest().configuration().get("runtimeSecret").generatedRotationGroup());
+    assertTrue(result.manifest().services().get(1).beforePrimary());
+    assertTrue(result.manifest().services().get(1).runToCompletion());
+  }
+
+  @Test
+  void rejectsGeneratedSecretsAndLifecyclePropertiesInV1() throws Exception {
+    var manifest = fixture("stripe");
+    manifest.with("configuration").putObject("runtimeSecret")
+        .put("type", "secret").put("required", true).put("secret", true)
+        .put("generated", true).put("generatedLength", 24).put("label", "Runtime secret");
+    manifest.set("services", mapper.readTree("""
+        [{"id":"setup","image":"%s","port":0,"healthPath":null,
+          "beforePrimary":true,"runToCompletion":true}]
+        """.formatted(image("setup"))));
+
+    var result = rules.validate(manifest, catalog(manifest.path("id").asText()));
+
+    assertFalse(result.valid());
+    assertTrue(result.errors().contains("generated configuration secrets require manifest v2"));
+    assertTrue(result.errors().contains("bundle service lifecycle options require manifest v2"));
+  }
+
+  @Test
   void rejectsUnsafeV2SecretFileBindings() throws Exception {
     var manifest = v2Manifest("capability.payment-test");
     ((com.fasterxml.jackson.databind.node.ObjectNode) manifest.path("packageManifest"))

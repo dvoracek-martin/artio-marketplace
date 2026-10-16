@@ -236,12 +236,28 @@ public record PluginManifest(
       List<String> dependsOn,
       List<String> persistentPaths,
       List<Integer> internalPorts,
-      Integer memoryLimitMb) {
+      Integer memoryLimitMb,
+      boolean beforePrimary,
+      boolean runToCompletion) {
     public BundleService {
       configurationBindings = immutableNullableMap(configurationBindings);
       dependsOn = immutableNullableList(dependsOn);
       persistentPaths = immutableNullableList(persistentPaths);
       internalPorts = immutableNullableList(internalPorts);
+    }
+
+    public BundleService(
+        String id,
+        String image,
+        int port,
+        String healthPath,
+        Map<String, String> configurationBindings,
+        List<String> dependsOn,
+        List<String> persistentPaths,
+        List<Integer> internalPorts,
+        Integer memoryLimitMb) {
+      this(id, image, port, healthPath, configurationBindings, dependsOn, persistentPaths,
+          internalPorts, memoryLimitMb, false, false);
     }
 
     public BundleService(
@@ -353,9 +369,46 @@ public record PluginManifest(
       Integer minimumLength,
       Integer maximumLength,
       Double minimum,
-      Double maximum) {
+      Double maximum,
+      boolean generated,
+      Integer generatedLength,
+      String generatedRotationGroup) {
     public ConfigField {
       options = immutableNullableList(options);
+    }
+
+    public ConfigField(
+        String type,
+        boolean required,
+        boolean secret,
+        String label,
+        String description,
+        String format,
+        List<String> options,
+        Integer minimumLength,
+        Integer maximumLength,
+        Double minimum,
+        Double maximum) {
+      this(type, required, secret, label, description, format, options, minimumLength,
+          maximumLength, minimum, maximum, false, null, null);
+    }
+
+    public ConfigField(
+        String type,
+        boolean required,
+        boolean secret,
+        String label,
+        String description,
+        String format,
+        List<String> options,
+        Integer minimumLength,
+        Integer maximumLength,
+        Double minimum,
+        Double maximum,
+        boolean generated,
+        Integer generatedLength) {
+      this(type, required, secret, label, description, format, options, minimumLength,
+          maximumLength, minimum, maximum, generated, generatedLength, null);
     }
   }
 }

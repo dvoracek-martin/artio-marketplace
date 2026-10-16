@@ -16,9 +16,57 @@
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
         "version": {"type": "string"},
         "image": {"type": "string", "pattern": "@sha256:[a-f0-9]{64}$"},
-        "extensionPoints": {"type": "array", "maxItems": 0, "description": "Forbidden in v2; declare capabilities explicitly."},
-        "healthPath": {"type": "string", "pattern": "^/"},
-        "diagnosticsPath": {"type": "string", "pattern": "^/"},
+        "configuration": {
+          "type": "object",
+          "description": "Validated administrator configuration schema.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {"enum": ["text", "secret", "boolean", "enum", "number", "url", "json"]},
+              "required": {"type": "boolean"},
+              "secret": {"type": "boolean"},
+              "generated": {"type": "boolean"},
+              "generatedLength": {"type": "integer", "minimum": 16, "maximum": 64},
+              "generatedRotationGroup": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,31}$"}
+            },
+            "allOf": [{
+              "if": {"properties": {"generated": {"const": true}}, "required": ["generated"]},
+              "then": {"properties": {"type": {"const": "secret"}, "secret": {"const": true}, "required": {"const": true}, "generatedLength": {"type": "integer", "minimum": 16, "maximum": 64}}, "required": ["type", "secret", "required", "generatedLength"]}
+            }, {
+              "if": {"properties": {"generated": {"const": false}}, "required": ["generated"]},
+              "then": {"not": {"anyOf": [{"required": ["generatedLength"]}, {"required": ["generatedRotationGroup"]}]}}
+            }]
+          }
+        },
+        "services": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$"},
+              "image": {"type": "string", "pattern": "@sha256:[a-f0-9]{64}$"},
+              "port": {"type": "integer", "minimum": 0, "maximum": 65535},
+              "healthPath": {"type": ["string", "null"]},
+              "beforePrimary": {"type": "boolean"},
+              "runToCompletion": {"type": "boolean"},
+              "dependsOn": {"type": "array", "items": {"type": "string"}},
+              "secretFileBindings": {
+                "type": "object",
+                "maxProperties": 32,
+                "propertyNames": {"pattern": "^/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+                "additionalProperties": {"type": "string"}
+              },
+              "persistentPaths": {"type": "array", "items": {"type": "string"}},
+              "internalPorts": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}}
+            },
+            "allOf": [{
+              "if": {"properties": {"runToCompletion": {"const": true}}, "required": ["runToCompletion"]},
+              "then": {"properties": {"port": {"const": 0}, "healthPath": {"type": "null"}, "persistentPaths": {"maxItems": 0}, "internalPorts": {"maxItems": 0}}, "required": ["port", "healthPath"]}
+            }]
+          }
+        },
+        "configurationBindings": {"type": "object", "description": "Non-secret configuration fields mapped to environment variables."},
         "secretFileBindings": {
           "type": "object",
           "maxProperties": 32,
@@ -26,6 +74,9 @@
           "propertyNames": {"pattern": "^/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
           "additionalProperties": {"type": "string"}
         },
+        "extensionPoints": {"type": "array", "maxItems": 0, "description": "Forbidden in v2; declare capabilities explicitly."},
+        "healthPath": {"type": "string", "pattern": "^/"},
+        "diagnosticsPath": {"type": "string", "pattern": "^/"},
         "geographicAvailability": {"type": "object"}
       }
     },
