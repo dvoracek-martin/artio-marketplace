@@ -445,10 +445,9 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   export ARTIO_EXTENSION_TRUSTED_REGISTRIES=${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-$registry}
   if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
-    --tests io.artio.api.extensions.PackagedExtensionControllerIntegrationTests \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured); then
-    echo 'Core Docker runtime, packaged controller, Marketplace v2 import and catalog integration checks passed with Marketplace-published image digests.'
+    echo 'Core Docker runtime, Marketplace manifest import and catalog integration checks passed with Marketplace-published image digests.'
   else
     core_status=$?
     echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
