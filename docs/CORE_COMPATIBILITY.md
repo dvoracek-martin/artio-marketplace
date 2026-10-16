@@ -24,6 +24,10 @@ Core Docker runtime starts the primary image and sidecars in declared dependency
 
 Core's extension management and Marketplace proxy controllers are versioned under `/api/v1`. Core imports v1 manifests through `/api/v1/admin/extensions/register` and v2 envelopes through `/api/v1/admin/extensions/register-v2`; both remain one development REST surface. The internal extension-controller routes under `/internal/v1/extensions/**` are a separate private runtime protocol. Marketplace does not call legacy unversioned aliases.
 
+## Live signed-advisory acceptance
+
+Marketplace CI run `38941144533` passed with Core commit `eb3d79e355d1db9b150d64bfee93ec61a19d3802`. It provisioned a feed-specific Ed25519 key, revoked `marketplace.reference@1.2.9`, then had Core fetch, verify and persist that live signed snapshot and its permanent image-digest ban. The same run passed Marketplace manifest import and the selected restricted Docker runtime tests; the fixture-gated egress test remains skipped. The published advisory feed deduplicates image digests when a release uses the same digest for multiple roles, matching Core's strict signed-inventory validation.
+
 ## Template review
 
 `stripe-payments`, `swiss-post`, `opensearch-search`, and `observability` templates use the same `manifestVersion: "1"` structure. Their image fields contain `REPLACE_WITH_PUBLISHED_IMAGE_DIGEST`; these are build/publish templates and not valid distributable release references. OpenSearch has one sidecar; Observability declares four and includes startup dependencies and persistent paths. The Marketplace rejects placeholders and verifies all image descriptors in Zot.
