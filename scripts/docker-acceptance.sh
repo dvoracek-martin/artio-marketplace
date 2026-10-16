@@ -95,9 +95,23 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
   main_tag="$publisher_registry/staging/plugins/artio-reference:$version"
   sidecar_tag="$publisher_registry/staging/plugins/artio-reference-companion:$version"
   tags+=("$main_tag" "$sidecar_tag")
-  docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$main_tag" "$example"
-  docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$sidecar_tag" "$example"
-  docker push "$main_tag" >/dev/null
+  if [[ $version == 1.3.0 ]]; then
+    # Exercise Zot promotion of an OCI index and both child platform manifests.
+    main_tag_amd64="$publisher_registry/staging/plugins/artio-reference:$version-amd64"
+    main_tag_arm64="$publisher_registry/staging/plugins/artio-reference:$version-arm64"
+    tags+=("$main_tag_amd64" "$main_tag_arm64")
+    docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$main_tag_amd64" "$example"
+    docker build --platform linux/arm64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$main_tag_arm64" "$example"
+    docker push "$main_tag_amd64" >/dev/null
+    docker push "$main_tag_arm64" >/dev/null
+    docker manifest create --insecure "$main_tag" "$main_tag_amd64" "$main_tag_arm64" >/dev/null
+    docker manifest push --insecure --purge "$main_tag" >/dev/null
+    docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$sidecar_tag" "$example"
+  else
+    docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$main_tag" "$example"
+    docker build --platform linux/amd64 --build-arg "ARTIO_REFERENCE_VERSION=$runtime_version" -t "$sidecar_tag" "$example"
+    docker push "$main_tag" >/dev/null
+  fi
   docker push "$sidecar_tag" >/dev/null
 
   main_digest=$(resolve_digest staging/plugins/artio-reference "$version")
@@ -275,13 +289,24 @@ PY
 
   docker pull "$main_ref" >/dev/null
   docker pull "$sidecar_ref" >/dev/null
+  if [[ $version == 1.3.0 ]]; then
+    docker pull --platform linux/amd64 "$main_ref" >/dev/null
+    # Docker's classic image store associates a selected platform with the index digest.
+    docker image rm "$main_ref" >/dev/null
+    docker pull --platform linux/arm64 "$main_ref" >/dev/null
+    echo 'Zot promotion preserved the OCI index and both linux/amd64 and linux/arm64 manifests.'
+  fi
   prerelease_query=""
   [[ $version == *-* ]] && prerelease_query='?includePrerelease=true'
   curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/releases/$version/manifest$prerelease_query" >/dev/null
 done
 old_main_ref="$registry/public/plugins/artio-reference@$main_digest_120"
 main_tag_120="$publisher_registry/staging/plugins/artio-reference:1.2.0"
-docker tag "$publisher_registry/staging/plugins/artio-reference:1.3.0" "$main_tag_120"
+overwrite_tag="$publisher_registry/staging/plugins/artio-reference:acceptance-overwrite"
+tags+=("$overwrite_tag")
+docker build --platform linux/amd64 --build-arg ARTIO_REFERENCE_VERSION=2 -t "$overwrite_tag" "$example"
+docker push "$overwrite_tag" >/dev/null
+docker tag "$overwrite_tag" "$main_tag_120"
 docker push "$main_tag_120" >/dev/null
 overwritten_digest=$(resolve_digest staging/plugins/artio-reference 1.2.0)
 [[ $overwritten_digest =~ ^sha256:[a-f0-9]{64}$ && $overwritten_digest != "$main_digest_120" ]] || {

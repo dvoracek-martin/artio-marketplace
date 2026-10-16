@@ -6,11 +6,14 @@ Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and disc
 
 - Public catalog, search, plugin and release details, media delivery, compatible release selection, and publisher listing controls.
 - Two-person manual release workflow for digest-pinned OCI images, localized metadata, screenshots, icon, and release notes.
+- Publisher images enter private `staging/**`; after independent approval, Marketplace automatically promotes the complete main/sidecar OCI bundle to `public/**` and only then exposes the release in the catalog.
 - PostgreSQL migrations and immutable release records; OCI registry and uploaded media are persisted separately.
 - Combined Marketplace + Zot container and PostgreSQL Compose deployment.
 - Backoffice UI, payments, and licensing are intentionally out of scope.
 
 See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATIBILITY.md), the [acceptance evidence](docs/ACCEPTANCE.md), [OpenAPI](marketplace-contract/openapi.yaml), and the [publishing guide](docs/PUBLISHING.md).
+
+Private staging and digest-preserving OCI promotion are verified against the pinned Zot registry, including a multi-platform index. Cryptographically signed release descriptors and Core-side official-provenance verification, signed security advisories, and custom local archive installation are still open; two-person review and digest checks alone do not establish artifact provenance. See the [integration security roadmap](docs/ROADMAP.md) before treating a published plugin as officially verified.
 
 ## Run the whole Marketplace with Docker
 

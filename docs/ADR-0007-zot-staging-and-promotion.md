@@ -1,6 +1,6 @@
 # ADR-0007: Private staging and approved OCI promotion
 
-**Status:** Accepted; live Zot verification required before closure  
+**Status:** Zot-native staging/promotion accepted and live-verified; signed Core descriptor gate remains open
 **Date:** 2026-10-16
 
 ## Context
@@ -27,4 +27,6 @@ Promotion is retryable by immutable digest. A partially copied approved bundle m
 
 ## Verification required
 
-The live gate must use the pinned Zot version and both gateway listeners to verify anonymous staging manifest/tag/blob denial, publisher public-write denial, promoter staging-to-public promotion, exact digest preservation for main and sidecars/indexes, failure/restart before finalization, catalog invisibility during partial promotion, and clean removal of only the isolated test project's containers, image tags, network, and volumes.
+The pinned Zot 2.1.21 live gate passed on 2026-10-16 through both gateway listeners: anonymous staging reads and writes were denied; publisher public writes were denied; publisher staging pushes and promoter copies succeeded; an OCI index and its `linux/amd64` and `linux/arm64` child manifests were copied with their exact digests; the v2 main/sidecar bundle became catalog-visible only after both images verified; and the durable job reached `PUBLISHED`. The runtime also pulled both index platforms and Core's Marketplace import plus Docker lifecycle tests passed against the published v2 release. Only the isolated acceptance project's containers, network, image and three named volumes were removed.
+
+The following remain open before this security directive's H1 is complete: signed immutable release descriptors and Core-side signature verification, fault injection for a process crash/partial sidecar promotion and retry, and an assertion that the catalog remains unavailable during an intentionally interrupted promotion. The Zot ACL model alone does not provide atomic public-read visibility for a previously approved bundle; the accepted boundary in §2 allows partially copied approved bytes but forbids official installation before a complete signed descriptor exists.
