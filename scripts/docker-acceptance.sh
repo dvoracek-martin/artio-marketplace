@@ -122,11 +122,16 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
       preapproval_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
         "http://$endpoint/v2/public/plugins/$image_repository/manifests/$image_digest")
       [[ $preapproval_status != 200 ]] || { echo "Unapproved staged artifact was publicly readable on $endpoint." >&2; exit 1; }
-      for blob_digest in $("$python" -c 'import json,sys; m=json.load(sys.stdin); print(m["config"]["digest"], *(x["digest"] for x in m["layers"]))' <<<"$staged_manifest"); do
-        blob_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-          "http://$endpoint/v2/public/plugins/$image_repository/blobs/$blob_digest")
-        [[ $blob_status != 200 ]] || { echo "Unapproved staged blob was anonymously readable on $endpoint." >&2; exit 1; }
-      done
+      # Blob digests can be shared with a previously approved release in the same public
+      # repository. Check blob confidentiality before the first promotion, while the
+      # isolated public namespace is still empty; later releases still check manifest ACLs.
+      if [[ $version == 1.2.0 ]]; then
+        for blob_digest in $("$python" -c 'import json,sys; m=json.load(sys.stdin); print(m["config"]["digest"], *(x["digest"] for x in m["layers"]))' <<<"$staged_manifest"); do
+          blob_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            "http://$endpoint/v2/public/plugins/$image_repository/blobs/$blob_digest")
+          [[ $blob_status != 200 ]] || { echo "Unapproved staged blob was anonymously readable on $endpoint." >&2; exit 1; }
+        done
+      fi
       private_read_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
         "http://$endpoint/v2/staging/plugins/$image_repository/manifests/$image_digest")
       [[ $private_read_status != 200 ]] || { echo "Private staging digest was anonymously readable on $endpoint." >&2; exit 1; }
@@ -207,12 +212,12 @@ JSON
   printf '%s\n' "$publish_output"
   ./scripts/publish-plugin.sh "$release_dir" "$base"
   staged_release_id=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1)
-  "$python" - "$base" "$staged_release_id" "$publisher_token" "$admin_token" <<'PY'
+  "$python" - "$base" "$staged_release_id" "$publisher_token" "$admin_token" "$version" <<'PY'
 import json, sys, urllib.error, urllib.request
-base, release_id, publisher, admin = sys.argv[1:]
+base, release_id, publisher, admin, version = sys.argv[1:]
 root = '/api/v1/admin/marketplace/releases/' + release_id
 def request(path, method='GET', token=publisher, payload=None):
-    headers = {'Authorization': 'Bearer ' + token}
+    headers = {} if token is None else {'Authorization': 'Bearer ' + token}
     data = None if payload is None else json.dumps(payload).encode()
     if data is not None: headers['Content-Type'] = 'application/json'
     req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
@@ -223,6 +228,8 @@ def request(path, method='GET', token=publisher, payload=None):
         return error.code, None
 status, review = request(root + '/review', token=admin)
 assert status == 200 and review['approvalState'] == 'PENDING', 'Admin could not inspect staged release'
+status, _ = request('/api/v1/marketplace/plugins/marketplace.reference/releases/' + version + '/manifest', token=None)
+assert status == 404, f'Unapproved descriptor was available with HTTP {status}'
 status, _ = request(root + '/approve', 'POST', payload={'reason': 'publisher must not self-approve'})
 assert status == 401, f'Publisher approval returned HTTP {status}'
 status, _ = request(root + '/publish', 'POST', token=admin)
@@ -239,9 +246,15 @@ assert status == 409, 'A catalog edit did not invalidate admin approval'
 status, approved = request(root + '/approve', 'POST', token=admin,
                             payload={'reason': 're-review after catalog update'})
 assert status == 200 and approved['approvalState'] == 'APPROVED', 'Re-approval failed'
+status, _ = request('/api/v1/marketplace/plugins/marketplace.reference/releases/' + version + '/manifest', token=None)
+assert status == 404, f'Approved but unpromoted descriptor was available with HTTP {status}'
 PY
   MARKETPLACE_PUBLISHER_TOKEN_FILE="$MARKETPLACE_PUBLISHER_TOKEN_FILE" \
     ./scripts/publish-staged-release.sh "$staged_release_id" "$base" >/dev/null
+  postgres_container=$("${compose[@]}" ps -q postgres)
+  promotion_state=$(docker exec "$postgres_container" psql -At -U artio_marketplace -d artio_marketplace -c \
+    "SELECT state || ':' || attempt_count FROM publication_promotions WHERE release_id='$staged_release_id'")
+  [[ $promotion_state == 'PUBLISHED:1' ]] || { echo "Durable promotion job state was $promotion_state for $version." >&2; exit 1; }
   if [[ $version == 1.2.0 ]]; then release_id_120=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
   if [[ $version == 1.2.9 ]]; then release_id_129=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
   if [[ $version == 1.2.0 ]]; then main_digest_120=$main_digest; fi
