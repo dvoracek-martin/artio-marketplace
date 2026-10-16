@@ -2,6 +2,7 @@ package io.artio.marketplace.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.artio.extensions.PluginManifest;
 import io.artio.extensions.PluginManifestV2;
 import io.artio.extensions.PluginManifestValidator;
@@ -47,7 +48,30 @@ public final class ManifestRules {
     PluginManifest parsed = null;
     try {
       if (manifest.has("packageManifest")) {
-        PluginManifestV2 parsedV2 = mapper.treeToValue(manifest, PluginManifestV2.class);
+        JsonNode v2Input = manifest.deepCopy();
+        JsonNode packageManifest = v2Input.path("packageManifest");
+        validateSecretFileBindings(
+            packageManifest.path("secretFileBindings"),
+            packageManifest.path("configuration"),
+            "primary service",
+            errors);
+        if (packageManifest instanceof ObjectNode packageObject) {
+          packageObject.remove("secretFileBindings");
+          JsonNode services = packageObject.path("services");
+          if (services.isArray()) {
+            for (int i = 0; i < services.size(); i++) {
+              JsonNode service = services.get(i);
+              validateSecretFileBindings(
+                  service.path("secretFileBindings"),
+                  packageObject.path("configuration"),
+                  "bundle service " + service.path("id").asText("unknown"),
+                  errors);
+              if (service instanceof ObjectNode serviceObject)
+                serviceObject.remove("secretFileBindings");
+            }
+          }
+        }
+        PluginManifestV2 parsedV2 = mapper.treeToValue(v2Input, PluginManifestV2.class);
         parsed = parsedV2.packageManifest();
         Set<String> declaredDependencies = declaredDependencies(parsed);
         errors.addAll(
@@ -63,6 +87,35 @@ public final class ManifestRules {
     }
     validateCatalog(catalog, parsed, errors);
     return new Validation(parsed, errors.stream().distinct().toList());
+  }
+
+  /** Validates the v2 secret-file extension while keeping the copied v1 DTO unchanged. */
+  private static void validateSecretFileBindings(
+      JsonNode bindings, JsonNode configuration, String owner, List<String> errors) {
+    if (bindings.isMissingNode() || bindings.isNull()) return;
+    if (!bindings.isObject()) {
+      errors.add(owner + " secretFileBindings must be an object");
+      return;
+    }
+    if (bindings.size() > 32) errors.add(owner + " may declare at most 32 secret file bindings");
+    bindings
+        .fields()
+        .forEachRemaining(
+            entry -> {
+              String path = entry.getKey();
+              if (!path.matches("/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+                  || path.contains("..")) {
+                errors.add(owner + " has an invalid secret file path");
+              }
+              JsonNode field =
+                  entry.getValue().isTextual()
+                      ? configuration.path(entry.getValue().asText())
+                      : com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+              if (!"secret".equals(field.path("type").asText())
+                  || !field.path("secret").asBoolean(false)) {
+                errors.add(owner + " secret file binding must reference a declared secret field");
+              }
+            });
   }
 
   private static Set<String> declaredDependencies(PluginManifest manifest) {

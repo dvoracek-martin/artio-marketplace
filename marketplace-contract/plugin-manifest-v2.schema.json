@@ -19,6 +19,13 @@
         "extensionPoints": {"type": "array", "maxItems": 0, "description": "Forbidden in v2; declare capabilities explicitly."},
         "healthPath": {"type": "string", "pattern": "^/"},
         "diagnosticsPath": {"type": "string", "pattern": "^/"},
+        "secretFileBindings": {
+          "type": "object",
+          "maxProperties": 32,
+          "description": "Declared secret fields mapped to safe private files under /run/secrets.",
+          "propertyNames": {"pattern": "^/run/secrets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+          "additionalProperties": {"type": "string"}
+        },
         "geographicAvailability": {"type": "object"}
       }
     },

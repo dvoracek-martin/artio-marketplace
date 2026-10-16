@@ -68,6 +68,66 @@ class ManifestRulesTest {
   }
 
   @Test
+  void acceptsV2SecretFileBindingsWithoutChangingTheV1PackageContract() throws Exception {
+    var manifest = v2Manifest("capability.payment-test");
+    var packageManifest =
+        (com.fasterxml.jackson.databind.node.ObjectNode) manifest.path("packageManifest");
+    packageManifest
+        .with("configuration")
+        .putObject("providerSecret")
+        .put("type", "secret")
+        .put("required", true)
+        .put("secret", true)
+        .put("label", "Provider secret");
+    packageManifest
+        .putObject("secretFileBindings")
+        .put("/run/secrets/provider-key", "providerSecret");
+
+    var result = rules.validate(manifest, catalog("capability.payment-test"));
+
+    assertTrue(result.valid(), "v2 secret-file manifest rejected: " + result.errors());
+    assertEquals("2", manifest.path("packageManifest").path("manifestVersion").asText());
+    assertTrue(manifest.path("packageManifest").has("secretFileBindings"));
+  }
+
+  @Test
+  void rejectsUnsafeV2SecretFileBindings() throws Exception {
+    var manifest = v2Manifest("capability.payment-test");
+    ((com.fasterxml.jackson.databind.node.ObjectNode) manifest.path("packageManifest"))
+        .putObject("secretFileBindings")
+        .put("/run/secrets/../escape", "stripeSecretKey");
+
+    var result = rules.validate(manifest, catalog("capability.payment-test"));
+
+    assertFalse(result.valid());
+    assertTrue(result.errors().stream().anyMatch(e -> e.contains("invalid secret file path")));
+  }
+
+  @Test
+  void rejectsV2SecretFileBindingsToNonSecretConfiguration() throws Exception {
+    var manifest = v2Manifest("capability.payment-test");
+    var packageManifest =
+        (com.fasterxml.jackson.databind.node.ObjectNode) manifest.path("packageManifest");
+    packageManifest
+        .with("configuration")
+        .putObject("ordinaryValue")
+        .put("type", "text")
+        .put("required", false)
+        .put("secret", false)
+        .put("label", "Ordinary value");
+    packageManifest
+        .putObject("secretFileBindings")
+        .put("/run/secrets/provider-key", "ordinaryValue");
+
+    var result = rules.validate(manifest, catalog("capability.payment-test"));
+
+    assertFalse(result.valid());
+    assertTrue(
+        result.errors().stream()
+            .anyMatch(e -> e.contains("must reference a declared secret field")));
+  }
+
+  @Test
   void rejectsUnsupportedCapabilitiesAndEventsInManifestV2() throws Exception {
     var manifest = v2Manifest("capability.invalid-test");
     ((com.fasterxml.jackson.databind.node.ArrayNode)
