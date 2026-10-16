@@ -20,7 +20,18 @@ public class SecurityConfiguration {
   @Bean
   SecurityFilterChain security(HttpSecurity http) throws Exception {
     return http.csrf(csrf -> csrf.disable())
-        .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+        .authorizeHttpRequests(
+            auth ->
+                auth.requestMatchers(
+                        org.springframework.http.HttpMethod.GET, "/api/v1/marketplace/**")
+                    .permitAll()
+                    // The controller applies distinct constant-time API-key checks for each role.
+                    .requestMatchers("/api/v1/admin/marketplace/**")
+                    .permitAll()
+                    .requestMatchers("/actuator/health/liveness", "/actuator/health/readiness")
+                    .permitAll()
+                    .anyRequest()
+                    .denyAll())
         .headers(headers -> headers.contentTypeOptions(Customizer.withDefaults()))
         .build();
   }

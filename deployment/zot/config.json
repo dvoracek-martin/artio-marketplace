@@ -2,9 +2,7 @@
   "distSpecVersion": "1.1.1",
   "storage": {
     "rootDirectory": "/var/lib/zot",
-    "gc": true,
-    "gcDelay": "2h",
-    "gcInterval": "24h"
+    "gc": false
   },
   "http": {
     "address": "0.0.0.0",
@@ -21,12 +19,12 @@
         "public/**": {
           "anonymousPolicy": ["read"],
           "policies": [
-            { "users": ["publisher"], "actions": ["read", "create", "update", "delete"] }
+            { "users": ["publisher"], "actions": ["read", "create", "update"] }
           ]
         },
         "**": {
           "policies": [
-            { "users": ["publisher"], "actions": ["read", "create", "update", "delete"] }
+            { "users": ["publisher"], "actions": ["read", "create", "update"] }
           ]
         }
       }

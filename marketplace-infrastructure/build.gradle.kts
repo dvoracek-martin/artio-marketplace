@@ -12,4 +12,5 @@ dependencies {
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.15.3")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
 }

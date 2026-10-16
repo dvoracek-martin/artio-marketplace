@@ -69,6 +69,30 @@ class ManifestRulesTest {
             .anyMatch(e -> e.contains("supports only")));
   }
 
+  @Test
+  void rejectsUnsafeCoreConfigurationLabelsAndOversizedOrDeepTextButKeepsUnicode()
+      throws Exception {
+    var manifest = fixture("stripe");
+    var catalog = catalog(manifest.path("id").asText());
+    manifest
+        .with("configuration")
+        .with("stripeSecretKey")
+        .put("label", "<img src=x onerror=alert(1)>");
+    assertTrue(
+        rules.validate(manifest, catalog).errors().stream().anyMatch(e -> e.contains("markup")));
+
+    manifest = fixture("stripe");
+    manifest.put("description", "ééééé Ω plugin");
+    catalog.with("title").put("en", "Märkte für Zürich");
+    assertTrue(rules.validate(manifest, catalog).valid());
+
+    manifest = fixture("stripe");
+    manifest.put("description", "x".repeat(10_001));
+    assertTrue(
+        rules.validate(manifest, catalog).errors().stream()
+            .anyMatch(e -> e.contains("10000 character")));
+  }
+
   private com.fasterxml.jackson.databind.node.ObjectNode fixture(String name) throws Exception {
     try (InputStream in = getClass().getResourceAsStream("/core/" + name + ".template.json")) {
       var manifest = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(in);

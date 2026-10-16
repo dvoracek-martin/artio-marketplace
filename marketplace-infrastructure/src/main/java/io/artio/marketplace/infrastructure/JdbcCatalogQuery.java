@@ -14,6 +14,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.server.ResponseStatusException;
 
+/**
+ * JDBC adapter; every recommendation surface uses the same release eligibility and SemVer order.
+ */
 @Repository
 public class JdbcCatalogQuery implements CatalogQuery {
   private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
@@ -31,136 +34,149 @@ public class JdbcCatalogQuery implements CatalogQuery {
       String category,
       String country,
       String coreVersion,
+      boolean includePrerelease,
       String locale,
       int page,
       int size) {
     checkPaging(page, size);
-    validateLocale(locale);
-    validateCountry(country);
+    validate(locale, coreVersion, country);
     String term = query == null || query.isBlank() ? null : query.trim();
     if (term != null && term.length() > 100)
       throw new IllegalArgumentException("q must be at most 100 characters");
-    if (coreVersion != null) SemanticVersion.parse(coreVersion);
-    String where =
-        """
-                  AND (? IS NULL OR p.plugin_id % ? OR p.slug % ? OR p.vendor % ?)
-                  AND (? IS NULL OR jsonb_exists(r.metadata->'categories', ?))
-                  AND (? IS NULL OR (marketplace_semver_compare(?,r.manifest->>'minimumCoreVersion')>=0 AND marketplace_semver_compare(?,r.manifest->>'maximumCoreVersion')<=0))
-                  AND (? IS NULL OR r.manifest->'geographicAvailability'->>'scope'='GLOBAL' OR jsonb_exists(r.manifest->'geographicAvailability'->'countries',?))
-                """;
-    List<Object> filterArgs =
-        new ArrayList<>(
-            java.util.Arrays.asList(
-                term,
-                term,
-                term,
-                term,
-                category,
-                category,
-                coreVersion,
-                coreVersion,
-                coreVersion,
-                country,
-                country));
+    String lateral = latestLateral();
+    String filters =
+        " AND (CAST(? AS text) IS NULL OR jsonb_exists(r.metadata->'categories', CAST(? AS text)))";
+    String from =
+        " FROM marketplace_plugins p JOIN LATERAL (" + lateral + ") r ON true WHERE 1=1" + filters;
+    var args = new ArrayList<Object>();
+    addEligibilityArgs(args, coreVersion, country, includePrerelease);
+    args.add(category);
+    args.add(category);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(term);
+    args.add(size);
+    args.add(page * size);
     var rows =
         jdbc.query(
-            """
-                SELECT p.plugin_id,p.slug,p.vendor,r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at
-                FROM marketplace_plugins p
-                JOIN LATERAL (SELECT version,manifest,metadata,published_at FROM marketplace_releases
-                  WHERE plugin_id=p.plugin_id AND publication_state='PUBLISHED' ORDER BY published_at DESC LIMIT 1) r ON true
-                WHERE p.listing_state='LISTED'
-                """
-                + where
-                + """
-                ORDER BY CASE WHEN ? IS NULL THEN 0 ELSE greatest(similarity(p.plugin_id,?),similarity(p.slug,?),similarity(p.vendor,?)) END DESC,p.plugin_id
-                LIMIT ? OFFSET ?
-                """,
-            (rs, n) ->
-                releaseCard(
-                    rs.getString("plugin_id"),
-                    rs.getString("slug"),
-                    rs.getString("vendor"),
-                    rs.getString("version"),
-                    rs.getString("manifest"),
-                    rs.getString("metadata"),
-                    rs.getObject("published_at", java.time.OffsetDateTime.class),
-                    locale),
-            java.util.stream.Stream.concat(
-                    filterArgs.stream(),
-                    java.util.stream.Stream.of(term, term, term, term, size, page * size))
-                .toArray());
+            "SELECT p.plugin_id,p.slug,p.vendor,r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at"
+                + from
+                + " AND (CAST(? AS text) IS NULL OR p.plugin_id % CAST(? AS text) OR p.slug % CAST(? AS text) OR p.vendor % CAST(? AS text))"
+                + " ORDER BY CASE WHEN CAST(? AS text) IS NULL THEN 0 ELSE greatest(similarity(p.plugin_id,CAST(? AS text)),similarity(p.slug,CAST(? AS text)),similarity(p.vendor,CAST(? AS text))) END DESC,p.plugin_id"
+                + " LIMIT ? OFFSET ?",
+            (rs, n) -> card(rs, locale),
+            args.toArray());
+
+    // The count uses exactly the same eligible release and listing filters as this page.
+    List<Object> countArgs = new ArrayList<>();
+    addEligibilityArgs(countArgs, coreVersion, country, includePrerelease);
+    countArgs.add(category);
+    countArgs.add(category);
+    countArgs.add(term);
+    countArgs.add(term);
+    countArgs.add(term);
+    countArgs.add(term);
     Long total =
         jdbc.queryForObject(
-            """
-                SELECT count(*) FROM marketplace_plugins p
-                JOIN LATERAL (SELECT version,manifest,metadata,published_at FROM marketplace_releases WHERE plugin_id=p.plugin_id AND publication_state='PUBLISHED' ORDER BY published_at DESC LIMIT 1) r ON true
-                WHERE p.listing_state='LISTED'
-                """
-                + where,
+            "SELECT count(*) FROM marketplace_plugins p JOIN LATERAL ("
+                + lateral
+                + ") r ON true WHERE 1=1"
+                + filters
+                + " AND (CAST(? AS text) IS NULL OR p.plugin_id % CAST(? AS text) OR p.slug % CAST(? AS text) OR p.vendor % CAST(? AS text))",
             Long.class,
-            filterArgs.toArray());
+            countArgs.toArray());
     return new Page(rows, page, size, total == null ? 0 : total);
   }
 
   @Override
-  public Map<String, Object> plugin(String pluginId, String locale) {
-    validateLocale(locale);
-    var list =
+  public Map<String, Object> plugin(
+      String pluginId,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale) {
+    validate(locale, coreVersion, country);
+    var rows =
         jdbc.query(
-            "SELECT p.plugin_id,p.slug,p.vendor,r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at FROM marketplace_plugins p JOIN LATERAL (SELECT version,manifest_document,metadata,published_at FROM marketplace_releases WHERE plugin_id=p.plugin_id AND publication_state='PUBLISHED' ORDER BY published_at DESC LIMIT 1) r ON true WHERE p.plugin_id=? AND p.listing_state='LISTED'",
-            (rs, n) ->
-                releaseCard(
-                    rs.getString("plugin_id"),
-                    rs.getString("slug"),
-                    rs.getString("vendor"),
-                    rs.getString("version"),
-                    rs.getString("manifest"),
-                    rs.getString("metadata"),
-                    rs.getObject("published_at", java.time.OffsetDateTime.class),
-                    locale),
-            pluginId);
-    if (list.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin not found");
-    var response = new LinkedHashMap<>(list.getFirst());
-    response.put("releases", releases(pluginId, locale, 0, 20));
+            "SELECT p.plugin_id,p.slug,p.vendor,r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at"
+                + " FROM marketplace_plugins p JOIN LATERAL ("
+                + latestLateral()
+                + ") r ON true WHERE p.plugin_id=?",
+            (rs, n) -> card(rs, locale),
+            eligibilityFirst(coreVersion, country, includePrerelease, pluginId));
+    if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin not found");
+    var response = new LinkedHashMap<>(rows.getFirst());
+    response.put(
+        "releases", releases(pluginId, coreVersion, country, includePrerelease, locale, 0, 20));
     return response;
   }
 
   @Override
-  public Page releases(String pluginId, String locale, int page, int size) {
+  public Page releases(
+      String pluginId,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale,
+      int page,
+      int size) {
     checkPaging(page, size);
-    validateLocale(locale);
-    requireListed(pluginId);
+    validate(locale, coreVersion, country);
+    String filter = " WHERE r.plugin_id=? AND " + SqlReleaseSelectionPolicy.eligible("r", "p");
+    List<Object> args = new ArrayList<>();
+    args.add(pluginId);
+    addEligibilityArgs(args, coreVersion, country, includePrerelease);
+    args.add(size);
+    args.add(page * size);
     var rows =
         jdbc.query(
-            "SELECT r.version,r.metadata::text,r.published_at FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.plugin_id=? AND r.publication_state='PUBLISHED' AND p.listing_state='LISTED' ORDER BY r.published_at DESC,r.version LIMIT ? OFFSET ?",
+            "SELECT r.version,r.metadata::text,r.published_at FROM marketplace_releases r"
+                + " JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + filter
+                + " ORDER BY "
+                + SqlReleaseSelectionPolicy.orderBy("r")
+                + " LIMIT ? OFFSET ?",
             (rs, n) ->
                 Map.<String, Object>of(
-                    "version",
-                    rs.getString(1),
-                    "publishedAt",
-                    rs.getObject(3, java.time.OffsetDateTime.class),
+                    "version", rs.getString(1),
+                    "publishedAt", rs.getObject(3, java.time.OffsetDateTime.class),
                     "releaseNotes",
-                    localized(json(rs.getString(2)), locale)
-                        .getOrDefault("releaseNotes", Map.of())),
-            pluginId,
-            size,
-            page * size);
+                        localized(json(rs.getString(2)), locale)
+                            .getOrDefault("releaseNotes", Map.of())),
+            args.toArray());
+    List<Object> countArgs = new ArrayList<>();
+    countArgs.add(pluginId);
+    addEligibilityArgs(countArgs, coreVersion, country, includePrerelease);
     Long total =
         jdbc.queryForObject(
-            "SELECT count(*) FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.plugin_id=? AND r.publication_state='PUBLISHED' AND p.listing_state='LISTED'",
+            "SELECT count(*) FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + filter,
             Long.class,
-            pluginId);
+            countArgs.toArray());
     return new Page(rows, page, size, total == null ? 0 : total);
   }
 
   @Override
-  public Map<String, Object> release(String pluginId, String version, String locale) {
-    validateLocale(locale);
+  public Map<String, Object> release(
+      String pluginId,
+      String version,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale) {
+    validate(locale, coreVersion, country);
     SemanticVersion.parse(version);
-    var list =
+    var rows =
         jdbc.query(
-            "SELECT r.manifest_document AS manifest,r.metadata::text,r.published_at,p.slug,p.vendor FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.plugin_id=? AND r.version=? AND r.publication_state='PUBLISHED' AND p.listing_state='LISTED'",
+            "SELECT r.manifest_document AS manifest,r.metadata::text,r.published_at,p.slug,p.vendor"
+                + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + " WHERE r.plugin_id=? AND r.version=? AND "
+                + SqlReleaseSelectionPolicy.eligible("r", "p"),
             (rs, n) ->
                 releaseCard(
                     pluginId,
@@ -171,21 +187,24 @@ public class JdbcCatalogQuery implements CatalogQuery {
                     rs.getString("metadata"),
                     rs.getObject("published_at", java.time.OffsetDateTime.class),
                     locale),
-            pluginId,
-            version);
-    if (list.isEmpty())
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Release not found");
-    return list.getFirst();
+            eligibilityThen(coreVersion, country, includePrerelease, List.of(pluginId, version)));
+    if (rows.isEmpty()) rejectUnavailableRelease(pluginId, version);
+    return rows.getFirst();
   }
 
   @Override
   public Map<String, Object> latestCompatible(
       String pluginId, String coreVersion, String country, boolean includePrerelease) {
-    var core = SemanticVersion.parse(coreVersion);
-    validateCountry(country);
-    var all =
+    validate("en", coreVersion, country);
+    var rows =
         jdbc.query(
-            "SELECT version,manifest_document AS manifest,metadata::text,published_at,p.slug,p.vendor FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.plugin_id=? AND r.publication_state='PUBLISHED' AND p.listing_state='LISTED'",
+            "SELECT r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at,p.slug,p.vendor"
+                + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + " WHERE r.plugin_id=? AND "
+                + SqlReleaseSelectionPolicy.eligible("r", "p")
+                + " ORDER BY "
+                + SqlReleaseSelectionPolicy.orderBy("r")
+                + " LIMIT 1",
             (rs, n) ->
                 releaseCard(
                     pluginId,
@@ -196,26 +215,49 @@ public class JdbcCatalogQuery implements CatalogQuery {
                     rs.getString("metadata"),
                     rs.getObject("published_at", java.time.OffsetDateTime.class),
                     "en"),
+            eligibilityThen(coreVersion, country, includePrerelease, List.of(pluginId)));
+    if (rows.isEmpty())
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No compatible release found");
+    return rows.getFirst();
+  }
+
+  private String latestLateral() {
+    return "SELECT r.version,r.manifest,r.manifest_document,r.metadata,r.published_at"
+        + " FROM marketplace_releases r WHERE r.plugin_id=p.plugin_id AND "
+        + SqlReleaseSelectionPolicy.eligible("r", "p")
+        + " ORDER BY "
+        + SqlReleaseSelectionPolicy.orderBy("r")
+        + " LIMIT 1";
+  }
+
+  private void rejectUnavailableRelease(String pluginId, String version) {
+    var state =
+        jdbc.query(
+            "SELECT p.moderation_state,r.publication_state FROM marketplace_plugins p"
+                + " LEFT JOIN marketplace_releases r ON r.plugin_id=p.plugin_id AND r.version=?"
+                + " WHERE p.plugin_id=?",
+            (rs, n) -> List.of(rs.getString(1), rs.getString(2) == null ? "" : rs.getString(2)),
+            version,
             pluginId);
-    return all.stream()
-        .filter(
-            r -> {
-              var version = SemanticVersion.parse((String) r.get("version"));
-              if (version.isPrerelease() && !includePrerelease) return false;
-              Map<?, ?> m = (Map<?, ?>) r.get("manifest");
-              return core.compareTo(SemanticVersion.parse((String) m.get("minimumCoreVersion")))
-                      >= 0
-                  && core.compareTo(SemanticVersion.parse((String) m.get("maximumCoreVersion")))
-                      <= 0
-                  && (country == null
-                      || countryMatches((Map<?, ?>) m.get("geographicAvailability"), country));
-            })
-        .max(
-            (a, b) ->
-                SemanticVersion.parse((String) a.get("version"))
-                    .compareTo(SemanticVersion.parse((String) b.get("version"))))
-        .orElseThrow(
-            () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No compatible release found"));
+    if (!state.isEmpty()
+        && "ACTIVE".equals(state.getFirst().getFirst())
+        && "REVOKED".equals(state.getFirst().getLast()))
+      throw new ResponseStatusException(
+          HttpStatus.GONE, "Release is revoked and is not installable");
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Release not found or not eligible");
+  }
+
+  private Map<String, Object> card(java.sql.ResultSet rs, String locale)
+      throws java.sql.SQLException {
+    return releaseCard(
+        rs.getString("plugin_id"),
+        rs.getString("slug"),
+        rs.getString("vendor"),
+        rs.getString("version"),
+        rs.getString("manifest"),
+        rs.getString("metadata"),
+        rs.getObject("published_at", java.time.OffsetDateTime.class),
+        locale);
   }
 
   private Map<String, Object> releaseCard(
@@ -242,14 +284,10 @@ public class JdbcCatalogQuery implements CatalogQuery {
     card.put(
         "compatibility",
         Map.of(
-            "minimumCoreVersion",
-            manifest.get("minimumCoreVersion"),
-            "maximumCoreVersion",
-            manifest.get("maximumCoreVersion"),
-            "installTimeChecksPending",
-            true,
-            "requiredDependencies",
-            manifest.getOrDefault("dependencies", List.of())));
+            "minimumCoreVersion", manifest.get("minimumCoreVersion"),
+            "maximumCoreVersion", manifest.get("maximumCoreVersion"),
+            "installTimeChecksPending", true,
+            "requiredDependencies", manifest.getOrDefault("dependencies", List.of())));
     return card;
   }
 
@@ -270,15 +308,10 @@ public class JdbcCatalogQuery implements CatalogQuery {
     }
   }
 
-  private void requireListed(String pluginId) {
-    Integer n =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM marketplace_plugins WHERE plugin_id=? AND listing_state='LISTED' AND EXISTS(SELECT 1 FROM marketplace_releases WHERE plugin_id=? AND publication_state='PUBLISHED')",
-            Integer.class,
-            pluginId,
-            pluginId);
-    if (n == null || n == 0)
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin not found");
+  private void validate(String locale, String coreVersion, String country) {
+    validateLocale(locale);
+    if (coreVersion != null) SemanticVersion.parse(coreVersion);
+    validateCountry(country);
   }
 
   private static void validateLocale(String locale) {
@@ -294,16 +327,42 @@ public class JdbcCatalogQuery implements CatalogQuery {
       throw new IllegalArgumentException("country must be an ISO 3166-1 alpha-2 code");
   }
 
-  private static boolean countryMatches(Map<?, ?> availability, String country) {
-    if (availability == null) return false;
-    if ("GLOBAL".equals(availability.get("scope"))) return true;
-    Object countries = availability.get("countries");
-    return countries instanceof List<?> values && values.contains(country);
-  }
-
   private static void checkPaging(int page, int size) {
     if (page < 0 || size < 1 || size > 100 || (long) page * size > 100_000_000L)
       throw new IllegalArgumentException(
           "page must be non-negative and size must be between 1 and 100");
+  }
+
+  private static void addEligibilityArgs(
+      List<Object> args, String coreVersion, String country, boolean includePrerelease) {
+    args.add(includePrerelease);
+    args.add(coreVersion);
+    args.add(coreVersion);
+    args.add(coreVersion);
+    args.add(country);
+    args.add(country);
+  }
+
+  private static Object[] eligibilityThen(
+      String coreVersion, String country, boolean includePrerelease, List<?> trailing) {
+    var args = new ArrayList<Object>();
+    args.addAll(trailing);
+    addEligibilityArgs(args, coreVersion, country, includePrerelease);
+    return args.toArray();
+  }
+
+  private static Object[] eligibilityFirst(
+      String coreVersion, String country, boolean includePrerelease, String trailing) {
+    var args = new ArrayList<Object>();
+    addEligibilityArgs(args, coreVersion, country, includePrerelease);
+    args.add(trailing);
+    return args.toArray();
+  }
+
+  private static List<Object> concat(List<?> first, List<?> second) {
+    var args = new ArrayList<Object>(first.size() + second.size());
+    args.addAll(first);
+    args.addAll(second);
+    return args;
   }
 }

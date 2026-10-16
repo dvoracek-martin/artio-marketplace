@@ -36,7 +36,7 @@ if not validation.get('valid'): raise SystemExit('Validation failed: '+'; '.join
 if dry: print('Validation passed; dry run did not publish.');sys.exit(0)
 mhash=hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest();key=f"publish-{manifest['id']}-{manifest['version']}-{mhash}"
 draft=request('/api/v1/admin/marketplace/releases','POST',payload,{'Idempotency-Key':key}); rid=draft['releaseId']
-if draft.get('state') == 'PUBLISHED': print(f"Already published {manifest['id']} {manifest['version']} (idempotent retry).");sys.exit(0)
+if draft.get('state') == 'PUBLISHED': print(f"Already published {manifest['id']} {manifest['version']} (idempotent retry).\nreleaseId={rid}");sys.exit(0)
 def upload(path, kind):
     boundary='----artio'+uuid.uuid4().hex
     body=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\nContent-Type: application/octet-stream\r\n\r\n').encode()+path.read_bytes()+f'\r\n--{boundary}--\r\n'.encode()
@@ -46,5 +46,6 @@ for i,path in enumerate(shots):catalog['screenshots'][i]['assetId']=upload(path,
 request(f'/api/v1/admin/marketplace/releases/{rid}/catalog','PUT',catalog)
 result=request(f'/api/v1/admin/marketplace/releases/{rid}/publish','POST')
 print(f"Published {manifest['id']} {manifest['version']}: {base}/api/v1/marketplace/plugins/{manifest['id']}/releases/{manifest['version']}")
+print('releaseId='+rid)
 print('manifestDigest='+validation['manifestDigest'])
 PY

@@ -41,7 +41,8 @@ public final class ManifestRules {
 
   public Validation validate(JsonNode manifest, JsonNode catalog) {
     var errors = new java.util.ArrayList<String>();
-    rejectUnsafeText(catalog, "catalog", errors);
+    inspectInput(manifest, "manifest", errors);
+    inspectInput(catalog, "catalog", errors);
     PluginManifest parsed = null;
     try {
       parsed = mapper.treeToValue(manifest, PluginManifest.class);
@@ -158,18 +159,58 @@ public final class ManifestRules {
     }
   }
 
-  private static void rejectUnsafeText(JsonNode node, String path, List<String> errors) {
-    if (node == null) return;
+  private static void inspectInput(JsonNode node, String root, List<String> errors) {
+    if (node == null) {
+      errors.add(root + " is required");
+      return;
+    }
+    long[] budget = {0, 0};
+    inspectText(node, root, root, 0, budget, errors);
+    if (budget[0] > 20_000) errors.add(root + " has too many JSON values");
+    if (budget[1] > 100_000) errors.add(root + " text exceeds the 100000 character limit");
+  }
+
+  private static void inspectText(
+      JsonNode node, String root, String path, int depth, long[] budget, List<String> errors) {
+    if (depth > 32) {
+      errors.add(root + " nesting exceeds 32 levels");
+      return;
+    }
+    budget[0]++;
     if (node.isTextual()) {
-      String value = node.asText().toLowerCase(java.util.Locale.ROOT);
+      String original = node.asText();
+      budget[1] += original.length();
+      if (original.length() > 10_000) errors.add(path + " exceeds the 10000 character limit");
+      String value = original.toLowerCase(java.util.Locale.ROOT);
       if (value.contains("<")
           || value.contains(">")
           || value.contains("javascript:")
           || value.contains("data:text/html")
-          || value.contains("vbscript:"))
-        errors.add(path + " contains markup or an unsafe URL scheme");
-    } else if (node.isContainerNode())
-      node.elements().forEachRemaining(child -> rejectUnsafeText(child, path, errors));
+          || value.contains("vbscript:")
+          || value.contains("data:image/svg+xml")
+          || original
+              .codePoints()
+              .anyMatch(cp -> Character.isISOControl(cp) && cp != '\n' && cp != '\r' && cp != '\t'))
+        errors.add(path + " contains markup, control characters or an unsafe URL scheme");
+    } else if (node.isContainerNode()) {
+      if (node.isObject()) {
+        node.fields()
+            .forEachRemaining(
+                entry -> {
+                  budget[1] += entry.getKey().length();
+                  inspectText(
+                      entry.getValue(),
+                      root,
+                      path + "." + entry.getKey(),
+                      depth + 1,
+                      budget,
+                      errors);
+                });
+      } else {
+        for (int i = 0; i < node.size(); i++)
+          inspectText(node.get(i), root, path + "[" + i + "]", depth + 1, budget, errors);
+      }
+    }
   }
 
   private static void requiredLocales(JsonNode node, String field, int max, List<String> errors) {

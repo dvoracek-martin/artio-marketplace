@@ -17,6 +17,7 @@ paths:
         - {name: category, in: query, schema: {type: string}}
         - {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}
         - {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}
+        - {name: includePrerelease, in: query, schema: {type: boolean, default: false}}
         - {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}
         - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
@@ -27,7 +28,7 @@ paths:
     get:
       operationId: getPlugin
       summary: Get a listed plugin
-      parameters: [{$ref: '#/components/parameters/PluginId'}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}, {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}, {name: includePrerelease, in: query, schema: {type: boolean, default: false}}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
       responses:
         '200': {description: Plugin listing detail, content: {application/json: {schema: {$ref: '#/components/schemas/Plugin'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -38,6 +39,9 @@ paths:
       summary: List published releases for a plugin
       parameters:
         - {$ref: '#/components/parameters/PluginId'}
+        - {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}
+        - {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}
+        - {name: includePrerelease, in: query, schema: {type: boolean, default: false}}
         - {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}
         - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
@@ -49,7 +53,7 @@ paths:
     get:
       operationId: getRelease
       summary: Get public release metadata and manifest
-      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}, {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}, {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}, {name: includePrerelease, in: query, schema: {type: boolean, default: false}}, {name: locale, in: query, schema: {type: string, enum: [en, de, fr, it], default: en}}]
       responses:
         '200':
           description: Release metadata with Core install-time checks explicitly pending.
@@ -60,7 +64,7 @@ paths:
     get:
       operationId: getCoreManifest
       summary: Get the original Artio Core manifest
-      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}]
+      parameters: [{$ref: '#/components/parameters/PluginId'}, {$ref: '#/components/parameters/Version'}, {name: coreVersion, in: query, schema: {$ref: '#/components/schemas/SemVer'}}, {name: country, in: query, schema: {type: string, pattern: '^[A-Z]{2}$'}}, {name: includePrerelease, in: query, schema: {type: boolean, default: false}}]
       responses:
         '200': {description: Original Core PluginManifest v1 JSON, content: {application/json: {schema: {type: object}}}}
         '404': {$ref: '#/components/responses/Error'}
@@ -165,8 +169,8 @@ paths:
   /api/v1/admin/marketplace/releases/{releaseId}/unlist:
     post:
       operationId: unlistRelease
-      summary: Remove a plugin from public catalog results
-      security: [{publisherToken: []}]
+      summary: Unlist one release from public recommendations
+      security: [{adminToken: []}]
       parameters: [{$ref: '#/components/parameters/ReleaseId'}]
       responses:
         '200': {description: Unlisted release}
@@ -176,8 +180,13 @@ paths:
     post:
       operationId: revokeRelease
       summary: Revoke a catalog recommendation while retaining immutable content
-      security: [{publisherToken: []}]
+      security: [{revocationToken: []}]
       parameters: [{$ref: '#/components/parameters/ReleaseId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Revocation'}
       responses:
         '200': {description: Revoked release; public OCI blobs remain accessible}
         '401': {$ref: '#/components/responses/Error'}
@@ -186,7 +195,7 @@ paths:
     get:
       operationId: getPublicationAudit
       summary: List append-only publication audit entries
-      security: [{publisherToken: []}]
+      security: [{adminToken: []}]
       parameters:
         - {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
         - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
@@ -194,9 +203,32 @@ paths:
         '200': {description: Paginated publication audit entries}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
+  /api/v1/admin/marketplace/plugins/{pluginId}/moderation:
+    post:
+      operationId: moderatePlugin
+      summary: Change plugin-level moderation without mutating release states
+      security: [{adminToken: []}]
+      parameters: [{$ref: '#/components/parameters/PluginId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, reason]
+              properties:
+                state: {type: string, enum: [ACTIVE, SUSPENDED, BANNED]}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {description: Moderation state updated}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     publisherToken: {type: http, scheme: bearer}
+    adminToken: {type: http, scheme: bearer}
+    revocationToken: {type: http, scheme: bearer}
   parameters:
     PluginId: {name: pluginId, in: path, required: true, schema: {type: string}}
     Version: {name: version, in: path, required: true, schema: {$ref: '#/components/schemas/SemVer'}}
@@ -204,6 +236,13 @@ components:
   responses:
     Error: {description: Safe error envelope, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   schemas:
+    Revocation:
+      type: object
+      additionalProperties: false
+      required: [category, reason]
+      properties:
+        category: {type: string, enum: [SECURITY, MALWARE, POLICY, LEGAL, OTHER]}
+        reason: {type: string, minLength: 1, maxLength: 1000}
     SemVer: {type: string, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'}
     Error:
       type: object

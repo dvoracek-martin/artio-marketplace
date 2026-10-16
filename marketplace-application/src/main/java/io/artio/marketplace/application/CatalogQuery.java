@@ -10,15 +10,34 @@ public interface CatalogQuery {
       String category,
       String country,
       String coreVersion,
+      boolean includePrerelease,
       String locale,
       int page,
       int size);
 
-  Map<String, Object> plugin(String pluginId, String locale);
+  Map<String, Object> plugin(
+      String pluginId,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale);
 
-  Page releases(String pluginId, String locale, int page, int size);
+  Page releases(
+      String pluginId,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale,
+      int page,
+      int size);
 
-  Map<String, Object> release(String pluginId, String version, String locale);
+  Map<String, Object> release(
+      String pluginId,
+      String version,
+      String coreVersion,
+      String country,
+      boolean includePrerelease,
+      String locale);
 
   Map<String, Object> latestCompatible(
       String pluginId, String coreVersion, String country, boolean includePrerelease);

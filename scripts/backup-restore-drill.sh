@@ -17,11 +17,13 @@ compose=(docker compose --project-name "$project" --env-file "$env_file" -f depl
 backup_dir=$(mktemp -d "${TMPDIR:-/tmp}/artio-marketplace-restore.XXXXXX")
 cleanup() { rm -rf -- "$backup_dir"; }
 trap cleanup EXIT
+backup_mount=$(if command -v cygpath >/dev/null 2>&1; then cygpath -m "$backup_dir"; else printf '%s' "$backup_dir"; fi)
 
 api_base=${MARKETPLACE_API_BASE:-http://127.0.0.1:${MARKETPLACE_API_PORT:-8080}}
+management_base=${MARKETPLACE_MANAGEMENT_URL:-http://127.0.0.1:${MARKETPLACE_MANAGEMENT_PORT:-8081}}
 wait_for() {
   local tries=0
-  until curl --fail --silent "$api_base/actuator/health/readiness" >/dev/null; do
+  until curl --fail --silent "$management_base/actuator/health/readiness" >/dev/null; do
     tries=$((tries + 1))
     if (( tries >= 60 )); then
       echo 'Marketplace did not become ready during the restore drill.' >&2
@@ -47,12 +49,12 @@ before_image=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["image"])
 "${compose[@]}" exec -T postgres pg_dump -U artio_marketplace -Fc artio_marketplace >"$backup_dir/marketplace.pgdump"
 
 for volume in zot_data catalog_assets; do
-  docker run --rm --user 0 --entrypoint tar \
+  MSYS_NO_PATHCONV=1 docker run --rm --user 0 --entrypoint tar \
     --volume "${project}_${volume}:/source:ro" \
-    --volume "$backup_dir:/backup" \
+    --volume "$backup_mount:/backup" \
     artio-marketplace:local -czf "/backup/${volume}.tar.gz" -C /source .
-  docker run --rm --user 0 --entrypoint tar \
-    --volume "$backup_dir:/backup:ro" \
+  MSYS_NO_PATHCONV=1 docker run --rm --user 0 --entrypoint tar \
+    --volume "$backup_mount:/backup:ro" \
     artio-marketplace:local -tzf "/backup/${volume}.tar.gz" >/dev/null
 done
 
@@ -62,9 +64,9 @@ echo 'Backup captured; simulating loss of the isolated database, Zot and media v
 
 for volume in zot_data catalog_assets; do
   docker volume create "${project}_${volume}" >/dev/null
-  docker run --rm --user 0 --entrypoint tar \
+  MSYS_NO_PATHCONV=1 docker run --rm --user 0 --entrypoint tar \
     --volume "${project}_${volume}:/target" \
-    --volume "$backup_dir:/backup:ro" \
+    --volume "$backup_mount:/backup:ro" \
     artio-marketplace:local --numeric-owner -xzf "/backup/${volume}.tar.gz" -C /target
 done
 

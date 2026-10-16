@@ -38,6 +38,9 @@ spring:
     converters:
       preferred-json-mapper: jackson2
 management:
+  server:
+    port: 8081
+    address: 0.0.0.0
   endpoints:
     web:
       exposure:
@@ -60,13 +63,20 @@ marketplace:
   rate-limit:
     public-per-minute: ${MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE:120}
     publisher-per-minute: ${MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE:30}
+    public-global-per-minute: ${MARKETPLACE_PUBLIC_GLOBAL_RATE_LIMIT_PER_MINUTE:200000}
+    publisher-global-per-minute: ${MARKETPLACE_PUBLISHER_GLOBAL_RATE_LIMIT_PER_MINUTE:5000}
     trusted-proxies: ${MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES:}
   registry:
     public-host: ${MARKETPLACE_REGISTRY_HOST:localhost:5000}
+    allowed-repository-prefixes: ${MARKETPLACE_REGISTRY_ALLOWED_REPOSITORY_PREFIXES:public/plugins/}
     internal-url: ${MARKETPLACE_ZOT_URL:http://localhost:5000}
     binary: ${MARKETPLACE_ZOT_BINARY:}
     config: ${MARKETPLACE_ZOT_CONFIG:/etc/zot/config.json}
   publisher:
     token-sha256: ${MARKETPLACE_PUBLISHER_TOKEN_SHA256:}
+  admin:
+    token-sha256: ${MARKETPLACE_ADMIN_TOKEN_SHA256:}
+  revocation:
+    token-sha256: ${MARKETPLACE_REVOCATION_TOKEN_SHA256:}
   media:
     root: ${MARKETPLACE_MEDIA_ROOT:./data/assets}

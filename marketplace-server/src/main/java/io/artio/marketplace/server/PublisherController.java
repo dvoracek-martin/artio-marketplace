@@ -3,6 +3,7 @@ package io.artio.marketplace.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.artio.marketplace.application.ArtifactVerifier;
+import io.artio.marketplace.domain.ModerationState;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
@@ -34,7 +35,10 @@ public class PublisherController {
   private final ManifestRules rules;
   private final ArtifactVerifier artifacts;
   private final io.artio.marketplace.infrastructure.MediaStore media;
-  private final String tokenHash;
+  private final org.springframework.transaction.support.TransactionTemplate transactions;
+  private final String publisherTokenHash;
+  private final String adminTokenHash;
+  private final String revocationTokenHash;
 
   public PublisherController(
       JdbcTemplate jdbc,
@@ -42,20 +46,27 @@ public class PublisherController {
       ManifestRules rules,
       ArtifactVerifier artifacts,
       io.artio.marketplace.infrastructure.MediaStore media,
-      @Value("${marketplace.publisher.token-sha256:}") String tokenHash) {
+      org.springframework.transaction.PlatformTransactionManager transactionManager,
+      @Value("${marketplace.publisher.token-sha256:}") String publisherTokenHash,
+      @Value("${marketplace.admin.token-sha256:}") String adminTokenHash,
+      @Value("${marketplace.revocation.token-sha256:}") String revocationTokenHash) {
     this.jdbc = jdbc;
     this.mapper = mapper;
     this.rules = rules;
     this.artifacts = artifacts;
     this.media = media;
-    this.tokenHash = tokenHash;
+    this.transactions =
+        new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+    this.publisherTokenHash = publisherTokenHash;
+    this.adminTokenHash = adminTokenHash;
+    this.revocationTokenHash = revocationTokenHash;
   }
 
   @PostMapping("/releases/validate")
   public Map<String, Object> validate(
       @RequestBody Submission request,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     var validation = rules.validate(request.manifest(), request.catalog());
     var errors = new java.util.ArrayList<>(validation.errors());
     if (validation.valid())
@@ -70,20 +81,17 @@ public class PublisherController {
   }
 
   @PostMapping("/releases")
-  @Transactional
   public ResponseEntity<Map<String, Object>> create(
       @RequestBody Submission request,
       @RequestHeader(value = "Authorization", required = false) String auth,
       @RequestHeader(value = "Idempotency-Key", required = false) String key) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     if (request.manifest() == null || request.catalog() == null)
       throw new IllegalArgumentException("manifest and catalog are required");
     if (key == null || !key.matches("[A-Za-z0-9._:-]{8,160}"))
       throw new IllegalArgumentException("Idempotency-Key is required (8 to 160 safe characters)");
     var validation = rules.validate(request.manifest(), request.catalog());
     var errors = new java.util.ArrayList<>(validation.errors());
-    if (validation.valid())
-      errors.addAll(artifacts.verify(rules.registryHost(), json(request.manifest())));
     if (!errors.isEmpty())
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
     String id = validation.manifest().id(),
@@ -122,42 +130,51 @@ public class PublisherController {
       return ResponseEntity.ok(
           Map.of("releaseId", p.get("id"), "state", p.get("state"), "idempotent", true));
     }
+    errors.addAll(artifacts.verify(rules.registryHost(), manifest));
+    if (!errors.isEmpty())
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
+    String createdReleaseId;
     try {
-      jdbc.update(
-          "INSERT INTO marketplace_plugins(plugin_id,slug,vendor,listing_state) VALUES (?,?,?,'UNLISTED') ON CONFLICT(plugin_id) DO NOTHING",
-          id,
-          slug,
-          validation.manifest().vendor());
-      var owner =
-          jdbc.query(
-                  "SELECT slug,vendor FROM marketplace_plugins WHERE plugin_id=?",
-                  (rs, n) -> List.of(rs.getString(1), rs.getString(2)),
-                  id)
-              .getFirst();
-      if (!owner.get(0).equals(slug))
-        throw new ResponseStatusException(
-            HttpStatus.CONFLICT, "Plugin id is already reserved to another slug");
-      jdbc.update(
-          "INSERT INTO marketplace_releases(release_id,plugin_id,version,manifest,manifest_document,manifest_sha256,metadata,publication_state,idempotency_key,create_request_sha256) VALUES (?::uuid,?,?,?::jsonb,?,?,?::jsonb,'VALIDATED',?,?)",
-          UUID.randomUUID().toString(),
-          id,
-          version,
-          manifest,
-          manifest,
-          digest,
-          metadata,
-          key,
-          requestDigest);
+      createdReleaseId =
+          transactions.execute(
+              status -> {
+                jdbc.update(
+                    "INSERT INTO marketplace_plugins(plugin_id,slug,vendor) VALUES (?,?,?) ON CONFLICT(plugin_id) DO NOTHING",
+                    id,
+                    slug,
+                    validation.manifest().vendor());
+                var owner =
+                    jdbc.query(
+                            "SELECT slug,vendor FROM marketplace_plugins WHERE plugin_id=?",
+                            (rs, n) -> List.of(rs.getString(1), rs.getString(2)),
+                            id)
+                        .getFirst();
+                if (!owner.get(0).equals(slug))
+                  throw new ResponseStatusException(
+                      HttpStatus.CONFLICT, "Plugin id is already reserved to another slug");
+                jdbc.update(
+                    "INSERT INTO marketplace_releases(release_id,plugin_id,version,manifest,manifest_document,manifest_sha256,metadata,publication_state,idempotency_key,create_request_sha256) VALUES (?::uuid,?,?,?::jsonb,?,?,?::jsonb,'VALIDATED',?,?)",
+                    UUID.randomUUID().toString(),
+                    id,
+                    version,
+                    manifest,
+                    manifest,
+                    digest,
+                    metadata,
+                    key,
+                    requestDigest);
+                audit("CREATE_VALIDATED", id + "@" + version, "OK");
+                return findReleaseId(id, version);
+              });
     } catch (org.springframework.dao.DuplicateKeyException conflict) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Plugin release version or idempotency key already exists");
     }
-    audit("CREATE_VALIDATED", id + "@" + version, "OK");
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             Map.of(
                 "releaseId",
-                findReleaseId(id, version),
+                createdReleaseId,
                 "pluginId",
                 id,
                 "version",
@@ -170,7 +187,7 @@ public class PublisherController {
   public Map<String, Object> draft(
       @PathVariable String releaseId,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     return lookupDraft(releaseId);
   }
 
@@ -180,16 +197,20 @@ public class PublisherController {
       @PathVariable String releaseId,
       @RequestBody JsonNode catalog,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     var r = releaseRow(releaseId);
     var manifest = parse(r.get("manifest"));
     var v = rules.validate(manifest, catalog);
     if (!v.errors().isEmpty())
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", v.errors()));
-    jdbc.update(
-        "UPDATE marketplace_releases SET metadata=?::jsonb,publication_state='VALIDATED' WHERE release_id=?::uuid AND publication_state IN ('DRAFT','VALIDATED')",
-        json(catalog),
-        releaseId);
+    int updated =
+        jdbc.update(
+            "UPDATE marketplace_releases SET metadata=?::jsonb,publication_state='VALIDATED',row_version=row_version+1 WHERE release_id=?::uuid AND publication_state IN ('DRAFT','VALIDATED') AND row_version=?",
+            json(catalog),
+            releaseId,
+            Long.parseLong(r.get("rowVersion")));
+    if (updated != 1)
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "Release is no longer editable");
     audit("UPDATE_CATALOG", r.get("pluginId") + "@" + r.get("version"), "OK");
     return lookupDraft(releaseId);
   }
@@ -202,7 +223,7 @@ public class PublisherController {
       @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
       @RequestParam("kind") String kind,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     var r = releaseRow(releaseId);
     if (!List.of("DRAFT", "VALIDATED").contains(r.get("state")))
       throw new ResponseStatusException(
@@ -223,11 +244,10 @@ public class PublisherController {
   }
 
   @PostMapping("/releases/{releaseId}/publish")
-  @Transactional
   public Map<String, Object> publish(
       @PathVariable String releaseId,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    authenticate(auth);
+    authenticate(auth, publisherTokenHash, "publisher");
     var r = releaseRow(releaseId);
     if ("PUBLISHED".equals(r.get("state")))
       return Map.of(
@@ -244,33 +264,72 @@ public class PublisherController {
     if (!"VALIDATED".equals(r.get("state")))
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release is not in a publishable state");
+    if (!"ACTIVE".equals(r.get("moderation")))
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Plugin moderation blocks publication");
+    int reserved =
+        jdbc.update(
+            "UPDATE marketplace_releases SET publication_state='PUBLISHING',publishing_started_at=now(),row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='VALIDATED' AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
+            releaseId);
+    if (reserved != 1)
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Release or plugin moderation changed; retry");
+    var reservedRow = releaseRow(releaseId);
+    long reservationVersion = Long.parseLong(reservedRow.get("rowVersion"));
     var validation = rules.validate(parse(r.get("manifest")), parse(r.get("metadata")));
-    if (!validation.valid())
+    if (!validation.valid()) {
+      releaseReservation(releaseId, reservationVersion);
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, String.join("; ", validation.errors()));
-    var artifactErrors = artifacts.verify(rules.registryHost(), r.get("manifest"));
-    if (!artifactErrors.isEmpty())
+    }
+    List<String> artifactErrors;
+    try {
+      artifactErrors = artifacts.verify(rules.registryHost(), reservedRow.get("manifest"));
+    } catch (RuntimeException failure) {
+      releaseReservation(releaseId, reservationVersion);
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Registry verification failed; retry", failure);
+    }
+    if (!artifactErrors.isEmpty()) {
+      releaseReservation(releaseId, reservationVersion);
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, String.join("; ", artifactErrors));
+    }
     JsonNode metadata = parse(r.get("metadata"));
-    if (!assetExists(metadata.path("icon").asText()))
+    if (!assetExists(metadata.path("icon").asText())) {
+      releaseReservation(releaseId, reservationVersion);
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Catalog icon asset is missing");
+    }
     JsonNode shots = metadata.path("screenshots");
     if (shots.isArray())
       for (JsonNode shot : shots)
-        if (!assetExists(shot.path("assetId").asText()))
+        if (!assetExists(shot.path("assetId").asText())) {
+          releaseReservation(releaseId, reservationVersion);
           throw new ResponseStatusException(HttpStatus.CONFLICT, "A screenshot asset is missing");
-    int updated =
-        jdbc.update(
-            "UPDATE marketplace_releases SET publication_state='PUBLISHED',published_at=now() WHERE release_id=?::uuid AND publication_state='VALIDATED'",
-            releaseId);
-    if (updated != 1)
+        }
+    int updated;
+    try {
+      updated =
+          transactions.execute(
+              status -> {
+                int changed =
+                    jdbc.update(
+                        "UPDATE marketplace_releases SET publication_state='PUBLISHED',published_at=now(),publishing_started_at=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='PUBLISHING' AND row_version=? AND EXISTS (SELECT 1 FROM marketplace_plugins p WHERE p.plugin_id=marketplace_releases.plugin_id AND p.moderation_state='ACTIVE')",
+                        releaseId,
+                        reservationVersion);
+                if (changed == 1)
+                  audit("PUBLISH", r.get("pluginId") + "@" + r.get("version"), "OK");
+                return changed;
+              });
+    } catch (RuntimeException failure) {
+      releaseReservation(releaseId, reservationVersion);
+      throw failure;
+    }
+    if (updated != 1) {
+      releaseReservation(releaseId, reservationVersion);
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release changed while publishing; retry");
-    jdbc.update(
-        "UPDATE marketplace_plugins SET listing_state='LISTED',updated_at=now() WHERE plugin_id=?",
-        r.get("pluginId"));
-    audit("PUBLISH", r.get("pluginId") + "@" + r.get("version"), "OK");
+    }
     return Map.of(
         "releaseId",
         releaseId,
@@ -284,18 +343,38 @@ public class PublisherController {
         OffsetDateTime.now());
   }
 
+  private void releaseReservation(String releaseId, long reservationVersion) {
+    jdbc.update(
+        "UPDATE marketplace_releases SET publication_state='VALIDATED',publishing_started_at=NULL,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state='PUBLISHING' AND row_version=?",
+        releaseId,
+        reservationVersion);
+  }
+
   @PostMapping("/releases/{releaseId}/unlist")
+  @Transactional
   public Map<String, Object> unlist(
       @PathVariable String releaseId,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    return statusChange(releaseId, auth, "PUBLISHED", "UNLISTED", "UNLIST");
+    authenticate(auth, adminTokenHash, "admin");
+    return statusChange(releaseId, "PUBLISHED", "UNLISTED", "UNLIST", "admin", null);
   }
 
   @PostMapping("/releases/{releaseId}/revoke")
+  @Transactional
   public Map<String, Object> revoke(
       @PathVariable String releaseId,
+      @RequestBody(required = false) RevocationRequest request,
       @RequestHeader(value = "Authorization", required = false) String auth) {
-    return statusChange(releaseId, auth, "PUBLISHED", "REVOKED", "REVOKE");
+    authenticate(auth, revocationTokenHash, "revocation");
+    if (request == null
+        || request.reason() == null
+        || request.reason().isBlank()
+        || request.reason().length() > 1000
+        || request.category() == null
+        || !List.of("SECURITY", "MALWARE", "POLICY", "LEGAL", "OTHER").contains(request.category()))
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Revocation category and reason are required");
+    return statusChange(releaseId, "PUBLISHED", "REVOKED", "REVOKE", "revocation", request);
   }
 
   @GetMapping("/publication-audit")
@@ -303,7 +382,7 @@ public class PublisherController {
       @RequestHeader(value = "Authorization", required = false) String auth,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int size) {
-    authenticate(auth);
+    authenticate(auth, adminTokenHash, "admin");
     if (page < 0 || size < 1 || size > 100)
       throw new IllegalArgumentException("invalid pagination");
     return jdbc.query(
@@ -327,36 +406,104 @@ public class PublisherController {
   }
 
   private Map<String, Object> statusChange(
-      String releaseId, String auth, String from, String to, String action) {
-    authenticate(auth);
+      String releaseId,
+      String from,
+      String to,
+      String action,
+      String actor,
+      RevocationRequest request) {
     var r = releaseRow(releaseId);
-    int n =
-        jdbc.update(
-            "UPDATE marketplace_releases SET publication_state=? WHERE release_id=?::uuid AND publication_state=?",
-            to,
-            releaseId,
-            from);
+    int n;
+    if (request != null) {
+      n =
+          jdbc.update(
+              "UPDATE marketplace_releases SET publication_state=?,revoked_at=now(),revocation_category=?,revocation_reason=?,revoked_by=?,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state=?",
+              to,
+              request.category(),
+              request.reason(),
+              actor,
+              releaseId,
+              from);
+    } else {
+      n =
+          jdbc.update(
+              "UPDATE marketplace_releases SET publication_state=?,row_version=row_version+1 WHERE release_id=?::uuid AND publication_state=?",
+              to,
+              releaseId,
+              from);
+    }
     if (n != 1)
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "Release cannot transition from its current state");
-    if (to.equals("REVOKED"))
-      jdbc.update(
-          "UPDATE marketplace_plugins SET listing_state='REVOKED',updated_at=now() WHERE plugin_id=?",
-          r.get("pluginId"));
-    else
-      jdbc.update(
-          "UPDATE marketplace_plugins SET listing_state='UNLISTED',updated_at=now() WHERE plugin_id=?",
-          r.get("pluginId"));
-    audit(action, r.get("pluginId") + "@" + r.get("version"), "OK");
+    jdbc.update(
+        "INSERT INTO marketplace_audit(actor,action,target,outcome,details) VALUES (?,?,?,'OK',?::jsonb)",
+        actor,
+        action,
+        r.get("pluginId") + "@" + r.get("version"),
+        request == null
+            ? "{}"
+            : json(
+                mapper.valueToTree(
+                    Map.of("category", request.category(), "reason", request.reason()))));
     return Map.of("releaseId", releaseId, "state", to);
+  }
+
+  @org.springframework.transaction.annotation.Transactional
+  @PostMapping("/plugins/{pluginId}/moderation")
+  public Map<String, Object> moderatePlugin(
+      @PathVariable String pluginId,
+      @RequestBody ModerationRequest request,
+      @RequestHeader(value = "Authorization", required = false) String auth) {
+    authenticate(auth, adminTokenHash, "admin");
+    if (request == null
+        || !List.of("ACTIVE", "SUSPENDED", "BANNED").contains(request.state())
+        || request.reason() == null
+        || request.reason().isBlank()
+        || request.reason().length() > 1000)
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "A moderation state and reason are required");
+    var currentRows =
+        jdbc.query(
+            "SELECT moderation_state,moderation_version FROM marketplace_plugins WHERE plugin_id=?",
+            (rs, n) -> Map.entry(rs.getString(1), rs.getLong(2)),
+            pluginId);
+    if (currentRows.isEmpty())
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Plugin not found");
+    var current = ModerationState.valueOf(currentRows.getFirst().getKey());
+    var next = ModerationState.valueOf(request.state());
+    try {
+      current.transitionTo(next);
+    } catch (IllegalStateException invalid) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, invalid.getMessage());
+    }
+    int changed =
+        jdbc.update(
+            "UPDATE marketplace_plugins SET moderation_state=?,moderation_review_reason=?,moderation_updated_at=now(),moderation_version=moderation_version+1,updated_at=now() WHERE plugin_id=? AND moderation_state=? AND moderation_version=?",
+            next.name(),
+            request.reason(),
+            pluginId,
+            current.name(),
+            currentRows.getFirst().getValue());
+    if (changed != 1)
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Plugin moderation changed concurrently; retry");
+    jdbc.update(
+        "INSERT INTO marketplace_audit(actor,action,target,outcome,details) VALUES ('admin','PLUGIN_MODERATION',?,'OK',?::jsonb)",
+        pluginId,
+        json(mapper.valueToTree(Map.of("state", request.state(), "reason", request.reason()))));
+    return Map.of("pluginId", pluginId, "moderationState", request.state());
   }
 
   private record Submission(JsonNode manifest, JsonNode catalog) {}
 
-  private void authenticate(String authorization) {
-    if (tokenHash.isBlank())
+  private record ModerationRequest(String state, String reason) {}
+
+  private record RevocationRequest(String category, String reason) {}
+
+  private void authenticate(String authorization, String tokenHash, String actor) {
+    if (tokenHash == null || tokenHash.isBlank())
       throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE, "Publisher authentication is not configured");
+          HttpStatus.SERVICE_UNAVAILABLE, actor + " authentication is not configured");
     if (authorization == null || !authorization.startsWith("Bearer "))
       throw new ResponseStatusException(
           HttpStatus.UNAUTHORIZED, "Publisher bearer token is required");
@@ -364,7 +511,7 @@ public class PublisherController {
     if (!MessageDigest.isEqual(
         provided.getBytes(StandardCharsets.US_ASCII),
         tokenHash.toLowerCase(java.util.Locale.ROOT).getBytes(StandardCharsets.US_ASCII)))
-      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Publisher token is invalid");
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, actor + " token is invalid");
   }
 
   private String findReleaseId(String id, String version) {
@@ -378,7 +525,7 @@ public class PublisherController {
   private Map<String, String> releaseRow(String id) {
     try {
       return jdbc.queryForObject(
-          "SELECT plugin_id,version,manifest_document,metadata::text,publication_state FROM marketplace_releases WHERE release_id=?::uuid",
+          "SELECT r.plugin_id,r.version,r.manifest_document,r.metadata::text,r.publication_state,r.row_version,p.moderation_state FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id WHERE r.release_id=?::uuid",
           (rs, n) ->
               Map.of(
                   "pluginId",
@@ -390,7 +537,11 @@ public class PublisherController {
                   "metadata",
                   rs.getString(4),
                   "state",
-                  rs.getString(5)),
+                  rs.getString(5),
+                  "rowVersion",
+                  rs.getString(6),
+                  "moderation",
+                  rs.getString(7)),
           id);
     } catch (org.springframework.dao.EmptyResultDataAccessException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Draft not found");

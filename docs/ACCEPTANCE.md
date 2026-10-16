@@ -2,11 +2,17 @@
 
 This status distinguishes successful checks from failures and checks that have not run. A green job does not override a failed check inside a `continue-on-error` step.
 
-## Latest verified source commit
+## Pre-hardening baseline
 
 Commit `7de67c23bd16f87687c1b6fc7ce530354fd534a7` was pushed to `main`. GitHub Actions run [38827486941](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38827486941) completed successfully. It verified Java 25.0.4, Gradle 9.8.1, formatting, unit/architecture tests, JaCoCo, OpenAPI lint, a live Compose/PostgreSQL/Zot stack, the Docker acceptance script, the backup/restore drill, SPDX SBOM generation, Trivy, and stack cleanup.
 
-The live acceptance shell script exited 1 only after recording a failure from one pinned Artio Core test; the workflow intentionally continues to the separately gated restore drill, SBOM and scans. The hosted GitHub Actions run is green, but the Core controller check itself is not green.
+These results describe the predecessor implementation before the hardening work. At that baseline, the live acceptance shell script recorded a failure from one pinned Artio Core test and the workflow used `continue-on-error`. The hardening change removes that suppression; hosted CI for the new source must fail while this Core test remains unresolved.
+
+## Post-hardening local candidate evidence
+
+The source candidate is based on Marketplace hardening baseline `0f1d76e42908978911c7b10667827e033b38bc19`. Local verification on 2026-10-16 completed the Java 25 unit/architecture tests (including digest-verifier tests), Redocly OpenAPI lint, V1-to-V2 migration with pre-existing ambiguous rows, acceptance fail-closed self-check, full Compose/PostgreSQL/Zot Docker acceptance, PostgreSQL/Zot/media backup/restore with an exact manifest comparison and digest pull, and direct sensitive Actuator deny checks. The live acceptance output reached its final `Docker acceptance passed` line. Current detailed finding-by-finding status and residual risks are in [post-implementation hardening](POST_IMPLEMENTATION_HARDENING.md).
+
+The exact combined `spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` run failed locally when google-java-format threw `NoClassDefFoundError` for Guava nested classes during `spotlessJavaCheck`; separate clean-home `spotlessCheck` passed, and `clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification -x spotlessCheck` passed. Hosted CI will determine whether the combined task failure reproduces on its clean runner. Hosted SBOM/Trivy and pinned Core results are pending. No pinned Core test result is inferred from local Marketplace acceptance.
 
 ## Results
 
@@ -41,7 +47,7 @@ The successful run 38827486941 reported:
 - Trivy image scan: PASS under the time-limited upstream Zot/Tomcat CVE exceptions in `.trivyignore` and [Security](SECURITY.md).
 - Ephemeral Compose teardown with volumes: PASS.
 
-The acceptance step uses `continue-on-error` so an upstream pinned Core integration failure does not suppress SBOM generation, vulnerability scanning, or cleanup. Review the individual test result above in addition to the overall job conclusion.
+The predecessor run used `continue-on-error`, which is documented above as a historical baseline defect. The hardened workflow has a required live acceptance step without that suppression; failure keeps the job red. Restore, SBOM, Trivy and teardown use independent `always()`/cleanup conditions so diagnostics and cleanup continue after an acceptance failure. The result of the pushed hardening commit must be recorded here without hiding pinned Core failures.
 
 ## Compatibility boundary
 

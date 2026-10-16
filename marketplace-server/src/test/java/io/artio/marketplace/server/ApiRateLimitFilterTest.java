@@ -36,7 +36,7 @@ class ApiRateLimitFilterTest {
 
   @Test
   void forwardedAddressIsUsedOnlyWhenImmediatePeerIsExplicitlyTrusted() throws Exception {
-    var trusted = new ApiRateLimitFilter(new ObjectMapper(), 1, 1, "127.0.0.1", clock);
+    var trusted = new ApiRateLimitFilter(new ObjectMapper(), 1, 1, "127.0.0.0/8,10.0.0.0/8", clock);
     var ignored = new ApiRateLimitFilter(new ObjectMapper(), 1, 1, "", clock);
     var passed = new AtomicInteger();
 
@@ -48,6 +48,25 @@ class ApiRateLimitFilterTest {
         .isEqualTo(200);
     assertThat(request(ignored, "/api/v1/marketplace/plugins", "192.0.2.2", passed).getStatus())
         .isEqualTo(429);
+  }
+
+  @Test
+  void trustedForwardingWalksFromTheRightAcrossTrustedProxyHops() throws Exception {
+    var filter = new ApiRateLimitFilter(new ObjectMapper(), 1, 1, "127.0.0.0/8,10.0.0.0/8", clock);
+    var passed = new AtomicInteger();
+    var first = request(filter, "/api/v1/marketplace/plugins", "192.0.2.77, 10.0.0.4", passed);
+    var sameClient = request(filter, "/api/v1/marketplace/plugins", "192.0.2.77, 10.0.0.9", passed);
+    assertThat(first.getStatus()).isEqualTo(200);
+    assertThat(sameClient.getStatus()).isEqualTo(429);
+  }
+
+  @Test
+  void globalAdmissionCeilingStillBoundsTrafficWhenClientKeysVary() throws Exception {
+    var filter = new ApiRateLimitFilter(new ObjectMapper(), 100, 100, 2, 2, "", clock);
+    var passed = new AtomicInteger();
+    assertThat(requestFrom(filter, "192.0.2.1", passed).getStatus()).isEqualTo(200);
+    assertThat(requestFrom(filter, "192.0.2.2", passed).getStatus()).isEqualTo(200);
+    assertThat(requestFrom(filter, "192.0.2.3", passed).getStatus()).isEqualTo(429);
   }
 
   @Test
@@ -68,6 +87,16 @@ class ApiRateLimitFilterTest {
     request.setRequestURI(path);
     request.setRemoteAddr("127.0.0.1");
     if (forwardedFor != null) request.addHeader("X-Forwarded-For", forwardedFor);
+    var response = new MockHttpServletResponse();
+    filter.doFilter(request, response, (req, res) -> passed.incrementAndGet());
+    return response;
+  }
+
+  private static MockHttpServletResponse requestFrom(
+      ApiRateLimitFilter filter, String remote, AtomicInteger passed) throws Exception {
+    var request = new MockHttpServletRequest("GET", "/api/v1/marketplace/plugins");
+    request.setRequestURI("/api/v1/marketplace/plugins");
+    request.setRemoteAddr(remote);
     var response = new MockHttpServletResponse();
     filter.doFilter(request, response, (req, res) -> passed.incrementAndGet());
     return response;

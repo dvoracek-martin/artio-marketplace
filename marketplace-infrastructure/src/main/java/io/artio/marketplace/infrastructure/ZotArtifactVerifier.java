@@ -31,6 +31,7 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
           "application/vnd.docker.distribution.manifest.list.v2+json");
   private final String expectedHost;
   private final URI zotBase;
+  private final List<String> allowedRepositoryPrefixes;
   private final HttpClient http =
       HttpClient.newBuilder()
           .connectTimeout(Duration.ofSeconds(3))
@@ -40,13 +41,24 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
 
   public ZotArtifactVerifier(
       @Value("${marketplace.registry.public-host:localhost:5000}") String expectedHost,
-      @Value("${marketplace.registry.internal-url:http://zot:5000}") URI zotBase) {
+      @Value("${marketplace.registry.internal-url:http://zot:5000}") URI zotBase,
+      @Value("${marketplace.registry.allowed-repository-prefixes:public/plugins/}")
+          String allowedPrefixes) {
     if (zotBase.getUserInfo() != null
         || zotBase.getHost() == null
         || !Set.of("http", "https").contains(zotBase.getScheme()))
       throw new IllegalArgumentException("Invalid configured Zot endpoint");
     this.expectedHost = expectedHost.toLowerCase(java.util.Locale.ROOT);
     this.zotBase = zotBase;
+    this.allowedRepositoryPrefixes =
+        java.util.Arrays.stream(allowedPrefixes.split(","))
+            .map(String::trim)
+            .filter(prefix -> !prefix.isEmpty())
+            .toList();
+    if (this.allowedRepositoryPrefixes.isEmpty()
+        || this.allowedRepositoryPrefixes.stream()
+            .anyMatch(prefix -> prefix.startsWith("/") || prefix.contains("..")))
+      throw new IllegalArgumentException("At least one safe OCI repository prefix is required");
   }
 
   @Override
@@ -89,6 +101,10 @@ public final class ZotArtifactVerifier implements ArtifactVerifier {
     if (!host.equals(expectedHost)
         || !host.equals(requestedHost.toLowerCase(java.util.Locale.ROOT))) {
       errors.add(field + " registry is not the configured public registry");
+      return;
+    }
+    if (allowedRepositoryPrefixes.stream().noneMatch(repo::startsWith)) {
+      errors.add(field + " OCI repository is outside the approved repository prefixes");
       return;
     }
     try {

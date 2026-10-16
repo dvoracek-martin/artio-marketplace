@@ -35,38 +35,57 @@ public class PublicCatalogController {
       @RequestParam(required = false) String category,
       @RequestParam(required = false) String country,
       @RequestParam(required = false) String coreVersion,
+      @RequestParam(defaultValue = "false") boolean includePrerelease,
       @RequestParam(defaultValue = "en") String locale,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
-    return catalog.plugins(q, category, country, coreVersion, locale, page, size);
+    return catalog.plugins(
+        q, category, country, coreVersion, includePrerelease, locale, page, size);
   }
 
   @GetMapping("/plugins/{pluginId}")
   public Map<String, Object> plugin(
-      @PathVariable String pluginId, @RequestParam(defaultValue = "en") String locale) {
-    return catalog.plugin(pluginId, locale);
+      @PathVariable String pluginId,
+      @RequestParam(required = false) String coreVersion,
+      @RequestParam(required = false) String country,
+      @RequestParam(defaultValue = "false") boolean includePrerelease,
+      @RequestParam(defaultValue = "en") String locale) {
+    return catalog.plugin(pluginId, coreVersion, country, includePrerelease, locale);
   }
 
   @GetMapping("/plugins/{pluginId}/releases")
   public CatalogQuery.Page releases(
       @PathVariable String pluginId,
+      @RequestParam(required = false) String coreVersion,
+      @RequestParam(required = false) String country,
+      @RequestParam(defaultValue = "false") boolean includePrerelease,
       @RequestParam(defaultValue = "en") String locale,
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size) {
-    return catalog.releases(pluginId, locale, page, size);
+    return catalog.releases(pluginId, coreVersion, country, includePrerelease, locale, page, size);
   }
 
   @GetMapping("/plugins/{pluginId}/releases/{version}")
   public Map<String, Object> release(
       @PathVariable String pluginId,
       @PathVariable String version,
+      @RequestParam(required = false) String coreVersion,
+      @RequestParam(required = false) String country,
+      @RequestParam(defaultValue = "false") boolean includePrerelease,
       @RequestParam(defaultValue = "en") String locale) {
-    return catalog.release(pluginId, version, locale);
+    return catalog.release(pluginId, version, coreVersion, country, includePrerelease, locale);
   }
 
   @GetMapping("/plugins/{pluginId}/releases/{version}/manifest")
-  public Object manifest(@PathVariable String pluginId, @PathVariable String version) {
-    return catalog.release(pluginId, version, "en").get("manifest");
+  public Object manifest(
+      @PathVariable String pluginId,
+      @PathVariable String version,
+      @RequestParam(required = false) String coreVersion,
+      @RequestParam(required = false) String country,
+      @RequestParam(defaultValue = "false") boolean includePrerelease) {
+    return catalog
+        .release(pluginId, version, coreVersion, country, includePrerelease, "en")
+        .get("manifest");
   }
 
   @GetMapping("/plugins/{pluginId}/latest-compatible")
@@ -109,7 +128,7 @@ public class PublicCatalogController {
                 Map.of("en", "Operations", "de", "Betrieb", "fr", "Opérations", "it", "Operazioni"),
             "other", Map.of("en", "Other", "de", "Sonstiges", "fr", "Autre", "it", "Altro"));
     return jdbc.query(
-        "SELECT DISTINCT c.value #>> '{}' AS code FROM marketplace_plugins p JOIN marketplace_releases r ON r.plugin_id=p.plugin_id CROSS JOIN LATERAL jsonb_array_elements(r.metadata->'categories') c WHERE r.publication_state='PUBLISHED' AND p.listing_state='LISTED' ORDER BY code",
+        "SELECT DISTINCT c.value #>> '{}' AS code FROM marketplace_plugins p JOIN marketplace_releases r ON r.plugin_id=p.plugin_id CROSS JOIN LATERAL jsonb_array_elements(r.metadata->'categories') c WHERE r.publication_state='PUBLISHED' AND p.moderation_state='ACTIVE' ORDER BY code",
         (rs, n) -> {
           String code = rs.getString("code");
           return Map.of(

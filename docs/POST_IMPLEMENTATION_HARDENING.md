@@ -26,4 +26,32 @@
 
 ## Progress and evidence
 
-This tracker will be updated with each hardening commit. Status values must reflect tests that actually ran; documentation or compile alone is not acceptance evidence.
+Hardening started from Marketplace baseline `0f1d76e42908978911c7b10667827e033b38bc19`; Artio Core remains untouched. The original implementation's hosted baseline and known Core controller fixture failure are documented above and in [acceptance evidence](ACCEPTANCE.md).
+
+### Local hardening evidence (2026-10-16)
+
+| Finding | Implementation/evidence | Status and remaining risk |
+|---|---|---|
+| A1 | Three API credentials use separate hashes/actors; Zot push cannot delete; public/admin proxy boundaries; registry host and repository-prefix allowlists; main and sidecar OCI manifests are digest-verified. `ZotArtifactVerifierTest` and Docker acceptance exercise valid digests, denied anonymous writes/deletes, and credential role separation. | **Partial.** Cosign/Sigstore signing and customer Core-side signature enforcement are explicitly not implemented; unsigned publishers remain a customer-production risk. Full identity/approval PKI is deferred. |
+| A2 | V2 release revocation is immutable and release-scoped, returns 410, removes only that version from recommendation, and preserves sibling versions. `docs/FUTURE_CORE_REVOCATION.md` describes only a proposed signed feed. | **Foundation verified.** No remote notification/disable command exists; installed Core plugins keep running. |
+| A3 | V2 separates moderation/release states and quarantines ambiguous legacy REVOKED plugins to REVIEW_REQUIRED with audit. Docker acceptance verifies sibling availability, suspension hiding, and rejected new publication while suspended. | **PASS locally.** A live upgrade on a production-sized database is not claimed; take/verify backups before deployment. |
+| A4/A5 | Trusted proxy CIDR/exact-hop parsing right-to-left, XFF sanitization in Nginx example, separate public/publisher caps, global caps, expiry/LRU eviction. Unit tests cover proxy chain/CIDR and cap behavior; acceptance checks the proxy configuration and concurrent public rate limit response. | **PASS locally for tested paths.** Multi-replica distributed rate limiting is not implemented; the service must remain single API replica until added. |
+| A6 | Required acceptance no longer uses `continue-on-error`; diagnostics/scans/teardown remain separate; controlled injected-failure self-check exits nonzero. | **Workflow gate implemented.** Hosted workflow result is pending the pushed commit. Pinned Core `PackagedExtensionControllerIntegrationTests` has a known upstream fixture NPE; it must keep CI red until that separately scoped Core issue is fixed. |
+| A7 | Zot GC is off and publisher delete is denied. Docker acceptance publishes/pulls main and sidecar artifacts by digest; backup/restore drill recreates only its named test volumes, restores PG/Zot/media, compares the exact manifest and pulls its digest. | **PASS for GC-disabled retention and tested restore.** No GC algorithm is enabled or claimed safe; registry storage grows and requires disk/backup monitoring. |
+| A8 | Shared bounded text rules reject markup, unsafe schemes, controls, excessive text/tree limits across catalog and Core manifest including configuration labels; Unicode remains intact. Unit tests exercise markup, oversized values, and Czech/German Unicode; live publication exercised decoded PNG media. | **Partial.** Media byte/format/dimension checks are in place, but a decompression-bomb and full malicious media corpus were not run. Consumers must render stored text as text, not raw HTML. |
+| A9 | One SQL release-selection policy filters plugin/release state, prerelease, Core range and country before SemVer selection for lists/details/exact/latest-compatible; migration SQL defines numeric SemVer key. | **PASS locally.** Docker acceptance verified stable/prerelease ordering and Core-compatible fallback across paginated release results. |
+| A10 | Catalog replacement uses row-version/state CAS and writes audit only on committed update. | **PASS locally.** Acceptance confirmed immutable update returns 409 and does not add an audit row; concurrent live multi-writer stress was not run. |
+| A11 | Security is deny-by-default; separate management port; public Nginx denies actuator. | **PASS locally for tested routes.** Direct requests to prometheus/env/mappings/configprops/heapdump/logfile/metrics returned 403/404, and the proxy returned 404 for actuator. |
+| A12 | External OCI verification is before short PostgreSQL reserve/finalize transactions; publication uses PUBLISHING + CAS, moderation/media recheck and a 15-minute reservation recovery. | **Implementation and successful OCI publication verified.** Automated registry timeout, process-crash, and concurrent revoke/publish fault-injection tests remain unimplemented; these are still release risks and not claimed as proven. |
+
+Commands actually run successfully against this source candidate:
+
+- Java 25: `./gradlew --no-daemon spotlessApply test checkArchitecture` (including `ZotArtifactVerifierTest`).
+- OpenAPI: `npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml`.
+- Migration: `bash ./scripts/test-v2-migration.sh` on a disposable PostgreSQL container with legacy rows.
+- CI gate self-test: `bash ./scripts/test-acceptance-fail-closed.sh`.
+- Live Docker/OCI acceptance: `bash ./scripts/run-acceptance.sh`; all listed stages reached the final `Docker acceptance passed` message.
+- Restore drill: `MARKETPLACE_RESTORE_DRILL=1 bash ./scripts/backup-restore-drill.sh`; manifest bytes stayed identical and its OCI digest remained pullable.
+- Direct management deny check: seven sensitive Actuator paths returned 403/404.
+
+The combined local CI Gradle command `spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` failed in this Windows Docker environment when google-java-format threw `NoClassDefFoundError` for Guava nested classes on `spotlessJavaCheck` (first the existing domain files with the cached Gradle home, then two infrastructure files in a fresh combined run). A separate `spotlessCheck` in a fresh Gradle home passed; `clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification -x spotlessCheck` passed. The hosted CI result is required to determine whether this is local task interaction or a reproducible build defect. Hosted Trivy/SBOM and pinned Core compatibility outcomes must also be recorded after push. Do not call this candidate fully release-ready until those gates and the A1/A8/A12 residuals above are dispositioned.

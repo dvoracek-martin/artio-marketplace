@@ -35,6 +35,8 @@ public final class MediaStore {
       throw new IllegalArgumentException(kind + " exceeds its upload size limit");
     try {
       byte[] bytes = file.getBytes();
+      if (bytes.length == 0 || bytes.length > limit)
+        throw new IllegalArgumentException(kind + " exceeds its upload size limit");
       String type = sniffAndDecode(bytes);
       String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
       var existing =

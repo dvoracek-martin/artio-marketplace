@@ -33,23 +33,36 @@ jobs:
         run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
       - name: Lint OpenAPI 3.1 contract
         run: npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml
+      - name: Verify the V1 to V2 migration on disposable PostgreSQL
+        run: bash ./scripts/test-v2-migration.sh
       - name: Prepare isolated Docker acceptance credentials
         shell: bash
         run: |
           set -euo pipefail
           mkdir -m 700 secrets
           publisher_token=$(openssl rand -hex 32)
+          admin_token=$(openssl rand -hex 32)
+          revocation_token=$(openssl rand -hex 32)
           zot_password=$(openssl rand -hex 32)
           postgres_password=$(openssl rand -hex 32)
           echo "::add-mask::$publisher_token"
+          echo "::add-mask::$admin_token"
+          echo "::add-mask::$revocation_token"
           echo "::add-mask::$zot_password"
           echo "::add-mask::$postgres_password"
           printf '%s\n' "$publisher_token" > secrets/publisher-token.txt
+          printf '%s\n' "$admin_token" > secrets/admin-token.txt
+          printf '%s\n' "$revocation_token" > secrets/revocation-token.txt
           printf '%s\n' "$zot_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i publisher > secrets/zot.htpasswd
           token_hash=$(printf '%s' "$publisher_token" | sha256sum | cut -d' ' -f1)
+          admin_token_hash=$(printf '%s' "$admin_token" | sha256sum | cut -d' ' -f1)
+          revocation_token_hash=$(printf '%s' "$revocation_token" | sha256sum | cut -d' ' -f1)
           cat > .env <<EOF
           POSTGRES_PASSWORD=$postgres_password
           MARKETPLACE_PUBLISHER_TOKEN_SHA256=$token_hash
+          MARKETPLACE_ADMIN_TOKEN_SHA256=$admin_token_hash
+          MARKETPLACE_REVOCATION_TOKEN_SHA256=$revocation_token_hash
+          MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE=200
           MARKETPLACE_REGISTRY_HOST=localhost:5000
           MARKETPLACE_API_PORT=8080
           MARKETPLACE_REGISTRY_PORT=5000
@@ -63,13 +76,19 @@ jobs:
           sudo systemctl restart docker
           docker info
       - name: Start Marketplace, Zot and PostgreSQL
+        id: start-stack
         run: docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml up --build -d
+      - name: Verify the acceptance gate fails closed
+        run: bash ./scripts/test-acceptance-fail-closed.sh
       - name: Exercise live Zot ACL, OCI publication and public API
-        continue-on-error: true # Keep later SBOM and image scans running if the pinned Core compatibility fixture exposes an upstream failure.
+        id: acceptance
         env:
           ARTIO_CORE_PATH: ${{ github.workspace }}/artio-core
-        run: ./scripts/docker-acceptance.sh
+          MARKETPLACE_ADMIN_TOKEN_FILE: ${{ github.workspace }}/secrets/admin-token.txt
+          MARKETPLACE_REVOCATION_TOKEN_FILE: ${{ github.workspace }}/secrets/revocation-token.txt
+        run: bash ./scripts/run-acceptance.sh
       - name: Restore isolated PostgreSQL, Zot and media backup and smoke-pull a published digest
+        if: always() && !cancelled() && steps.start-stack.outcome == 'success'
         env:
           MARKETPLACE_RESTORE_DRILL: '1'
           MARKETPLACE_ENV_FILE: .env
@@ -83,7 +102,7 @@ jobs:
             docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" -f deployment/compose.yaml logs --no-color || true
           fi
       - name: Generate SPDX SBOM for verified image
-        if: success()
+        if: always() && !cancelled() && steps.start-stack.outcome == 'success'
         run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.28.0 artio-marketplace:local -o spdx-json=marketplace.spdx.json
       - name: Upload verified build and SBOM artifacts
         if: success() && github.event_name == 'push'
@@ -97,7 +116,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Scan Marketplace image for fixed HIGH and CRITICAL vulnerabilities
-        if: success()
+        if: always() && !cancelled() && steps.start-stack.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: artio-marketplace:local

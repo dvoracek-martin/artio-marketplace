@@ -1,6 +1,6 @@
 # Artio Marketplace
 
-Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and discovering Artio Core plugins. It includes PostgreSQL metadata, a pinned Zot OCI registry, a versioned public REST API, and a token-protected publisher API. The service validates the exact plugin manifest contract copied from Artio Core `911f8196b1d76113804e274009e07ada17f15b33`; it does not change or embed Core.
+Artio Marketplace is a Java 25 / Spring Boot 4.1 service for publishing and discovering Artio Core plugins. It includes PostgreSQL metadata, a pinned Zot OCI registry, a versioned public REST API, and separate publisher, moderation, and revocation credentials. The service validates the exact plugin manifest contract copied from Artio Core `911f8196b1d76113804e274009e07ada17f15b33`; it does not change or embed Core.
 
 ## Current scope
 
@@ -16,10 +16,10 @@ See [architecture](docs/ARCHITECTURE.md), [Core compatibility](docs/CORE_COMPATI
 
 Prerequisites: Docker Engine with Compose v2. Build requires Internet access to Maven Central and the pinned base images.
 
-1. Create `.env` from `.env.example`. Replace the PostgreSQL password with a unique secret. Create a random publisher bearer token of at least 32 characters and set `MARKETPLACE_PUBLISHER_TOKEN_SHA256` to its lowercase SHA-256 hex digest. Keep the raw token in a separate protected file for the publishing script. The API stores only its hash.
+1. Create `.env` from `.env.example`. Replace the PostgreSQL password with a unique secret. Create separate random publisher, admin, and revocation bearer tokens of at least 32 characters and set each `*_TOKEN_SHA256` to its lowercase SHA-256 hex digest. Keep each raw token in its own protected file. The API stores only their hashes.
 2. Create a bcrypt htpasswd file with a user named `publisher`; place it outside this repository and set `ZOT_HTPASSWD_FILE` to its absolute path. With Docker and Apache `htpasswd`, run `docker run --rm -it httpd:2.4-alpine htpasswd -B -C 12 publisher`, enter a separate Zot password, and save the resulting single `publisher:$2y$...` line to that file. Restrict file access.
 3. Start the stack: `docker compose --env-file .env -f deployment/compose.yaml up --build -d`.
-4. Wait for `docker compose --env-file .env -f deployment/compose.yaml ps` to show Marketplace, PostgreSQL, and the small registry gateway healthy. Check `http://localhost:8080/actuator/health/readiness` and `http://localhost:5000/v2/`.
+4. Wait for `docker compose --env-file .env -f deployment/compose.yaml ps` to show Marketplace, PostgreSQL, and the small registry gateway healthy. Check management readiness at `http://127.0.0.1:8081/actuator/health/readiness` and the public registry ping at `http://localhost:5000/v2/`. Actuator is not served on the public API port.
 
 The Marketplace image contains Java and Zot. PostgreSQL is separate. Nginx exposes two loopback-only registry listeners to that same Zot storage: public pulls through `localhost:5000` get an anonymous `200` ping, while publisher login/push goes through `localhost:5001` and keeps Zot's Basic-auth challenge. This split is needed for Docker's challenge behavior. Manifest digests must use only the public host (`MARKETPLACE_REGISTRY_HOST=localhost:5000`); publisher tooling pushes through `MARKETPLACE_REGISTRY_PUBLISH_HOST=localhost:5001`. Zot still enforces anonymous read-only and authenticated publisher writes. For public deployment, terminate HTTPS at a trusted reverse proxy/load balancer and configure the public and publisher hostnames as shown in [the proxy example](deployment/reverse-proxy.example/marketplace.conf); restrict publisher ingress to trusted operator networks. Do not expose this local-only Compose configuration directly to the Internet.
 

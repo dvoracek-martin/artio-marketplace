@@ -7,6 +7,7 @@ import java.util.Map;
 public enum PublicationState {
   DRAFT,
   VALIDATED,
+  PUBLISHING,
   PUBLISHED,
   UNLISTED,
   REVOKED;
@@ -14,7 +15,8 @@ public enum PublicationState {
   private static final Map<PublicationState, EnumSet<PublicationState>> TRANSITIONS =
       Map.of(
           DRAFT, EnumSet.of(VALIDATED),
-          VALIDATED, EnumSet.of(DRAFT, PUBLISHED),
+          VALIDATED, EnumSet.of(DRAFT, PUBLISHING),
+          PUBLISHING, EnumSet.of(VALIDATED, PUBLISHED),
           PUBLISHED, EnumSet.of(UNLISTED, REVOKED),
           UNLISTED, EnumSet.of(PUBLISHED, REVOKED),
           REVOKED, EnumSet.noneOf(PublicationState.class));

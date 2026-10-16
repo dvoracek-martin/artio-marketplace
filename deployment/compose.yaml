@@ -9,13 +9,18 @@ services:
       - /tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001
     ports:
       - "127.0.0.1:${MARKETPLACE_API_PORT:-8080}:8080"
+      - "127.0.0.1:${MARKETPLACE_MANAGEMENT_PORT:-8081}:8081"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/artio_marketplace
       SPRING_DATASOURCE_USERNAME: artio_marketplace
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       MARKETPLACE_PUBLISHER_TOKEN_SHA256: ${MARKETPLACE_PUBLISHER_TOKEN_SHA256:?Set a SHA-256 hash in .env}
+      MARKETPLACE_ADMIN_TOKEN_SHA256: ${MARKETPLACE_ADMIN_TOKEN_SHA256:?Set a SHA-256 hash in .env}
+      MARKETPLACE_REVOCATION_TOKEN_SHA256: ${MARKETPLACE_REVOCATION_TOKEN_SHA256:?Set a SHA-256 hash in .env}
       MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE: ${MARKETPLACE_PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
       MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE: ${MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE:-30}
+      MARKETPLACE_PUBLIC_GLOBAL_RATE_LIMIT_PER_MINUTE: ${MARKETPLACE_PUBLIC_GLOBAL_RATE_LIMIT_PER_MINUTE:-200000}
+      MARKETPLACE_PUBLISHER_GLOBAL_RATE_LIMIT_PER_MINUTE: ${MARKETPLACE_PUBLISHER_GLOBAL_RATE_LIMIT_PER_MINUTE:-5000}
       MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES: ${MARKETPLACE_RATE_LIMIT_TRUSTED_PROXIES:-}
       MARKETPLACE_REGISTRY_HOST: ${MARKETPLACE_REGISTRY_HOST:-localhost:5000}
       MARKETPLACE_ZOT_URL: http://127.0.0.1:5000
@@ -33,7 +38,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health/readiness HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"]
       interval: 15s
       timeout: 4s
       start_period: 45s
