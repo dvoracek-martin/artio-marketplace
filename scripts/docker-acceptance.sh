@@ -17,6 +17,7 @@ release_refs=()
 release_id_120=""
 release_id_129=""
 main_digest_120=""
+sidecar_digest_120=""
 smoke_container=""
 proxy_container=""
 had_python_base=false
@@ -121,7 +122,15 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
       [[ $staged_tag_status != 200 ]] || { echo "Private staging tag was anonymously readable on $endpoint." >&2; exit 1; }
       preapproval_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
         "http://$endpoint/v2/public/plugins/$image_repository/manifests/$image_digest")
-      [[ $preapproval_status != 200 ]] || { echo "Unapproved staged artifact was publicly readable on $endpoint." >&2; exit 1; }
+      if [[ $preapproval_status == 200 ]]; then
+        previously_approved_digest=""
+        [[ $image_repository == artio-reference ]] && previously_approved_digest=$main_digest_120
+        [[ $image_repository == artio-reference-companion ]] && previously_approved_digest=$sidecar_digest_120
+        [[ -n $previously_approved_digest && $image_digest == "$previously_approved_digest" ]] || {
+          echo "A new unapproved OCI digest was publicly readable on $endpoint." >&2
+          exit 1
+        }
+      fi
       # Blob digests can be shared with a previously approved release in the same public
       # repository. Check blob confidentiality before the first promotion, while the
       # isolated public namespace is still empty; later releases still check manifest ACLs.
@@ -129,7 +138,12 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
         for blob_digest in $("$python" -c 'import json,sys; m=json.load(sys.stdin); print(m["config"]["digest"], *(x["digest"] for x in m["layers"]))' <<<"$staged_manifest"); do
           blob_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             "http://$endpoint/v2/public/plugins/$image_repository/blobs/$blob_digest")
-          [[ $blob_status != 200 ]] || { echo "Unapproved staged blob was anonymously readable on $endpoint." >&2; exit 1; }
+          if [[ $blob_status == 200 ]]; then
+            [[ -n $previously_approved_digest && $image_digest == "$previously_approved_digest" ]] || {
+              echo "A blob from a new unapproved OCI digest was anonymously readable on $endpoint." >&2
+              exit 1
+            }
+          fi
         done
       fi
       private_read_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --head --header "Accept: $accept" \
@@ -257,7 +271,7 @@ PY
   [[ $promotion_state == 'PUBLISHED:1' ]] || { echo "Durable promotion job state was $promotion_state for $version." >&2; exit 1; }
   if [[ $version == 1.2.0 ]]; then release_id_120=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
   if [[ $version == 1.2.9 ]]; then release_id_129=$(sed -n 's/^releaseId=//p' <<<"$publish_output" | tail -n 1); fi
-  if [[ $version == 1.2.0 ]]; then main_digest_120=$main_digest; fi
+  if [[ $version == 1.2.0 ]]; then main_digest_120=$main_digest; sidecar_digest_120=$sidecar_digest; fi
 
   docker pull "$main_ref" >/dev/null
   docker pull "$sidecar_ref" >/dev/null
