@@ -447,7 +447,13 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured); then
-    echo 'Core Docker runtime, Marketplace manifest import and catalog integration checks passed with Marketplace-published image digests.'
+    import_report="$core_path/artio-rest-api/build/test-results/integrationTest/TEST-io.artio.api.catalog.CatalogApiIntegrationTests.xml"
+    if [[ ! -f $import_report ]] || ! grep -q 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured' "$import_report"; then
+      core_status=1
+      echo 'The pinned Core checkout did not execute the required Marketplace manifest import test.' >&2
+    else
+      echo 'Core Docker runtime, Marketplace manifest import and catalog integration checks passed with Marketplace-published image digests.'
+    fi
   else
     core_status=$?
     echo "Pinned Core compatibility checks failed with exit $core_status; inspect the reported Core test failures. This step does not modify Artio Core." >&2
