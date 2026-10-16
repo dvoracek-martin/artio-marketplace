@@ -619,19 +619,25 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   export ARTIO_MARKETPLACE_BASE_URL=${ARTIO_MARKETPLACE_BASE_URL:-$base}
   export ARTIO_MARKETPLACE_TEST_PLUGIN_ID=marketplace.reference
   export ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION=1.3.0
+  export ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_ID=marketplace.reference
+  export ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_VERSION=1.2.9
   signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')
   export ARTIO_MARKETPLACE_TRUSTED_KEYS="$MARKETPLACE_SIGNING_KEY_ID=$signing_public_key"
   export ARTIO_EXTENSION_TRUSTED_REGISTRIES=${ARTIO_EXTENSION_TRUSTED_REGISTRIES:-$registry}
   if (cd "$core_path" && bash ./gradlew --no-daemon :artio-rest-api:integrationTest --rerun \
     --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests \
     --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls \
-    --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured); then
+    --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured \
+    --tests io.artio.api.extensions.MarketplaceAdvisoryAcceptanceIntegrationTests.consumesAndPersistsTheLiveMarketplaceSecurityRevocation); then
     import_report="$core_path/artio-rest-api/build/test-results/integrationTest/TEST-io.artio.api.catalog.CatalogApiIntegrationTests.xml"
-    if [[ ! -f $import_report ]] || ! grep -q 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured' "$import_report"; then
+    advisory_report="$core_path/artio-rest-api/build/test-results/integrationTest/TEST-io.artio.api.extensions.MarketplaceAdvisoryAcceptanceIntegrationTests.xml"
+    if [[ ! -f $import_report ]] || ! grep -q 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured' "$import_report" \
+      || [[ ! -f $advisory_report ]] || ! grep -q 'consumesAndPersistsTheLiveMarketplaceSecurityRevocation' "$advisory_report" \
+      || grep -q '<skipped\|<failure\|<error' "$advisory_report"; then
       core_status=1
-      echo 'The pinned Core checkout did not execute the required Marketplace manifest import test.' >&2
+      echo 'The pinned Core checkout did not pass both required Marketplace manifest import and signed security advisory acceptance tests.' >&2
     else
-      echo 'Core Docker runtime, Marketplace manifest import and catalog integration checks passed with Marketplace-published image digests.'
+      echo 'Core Docker runtime, Marketplace manifest import, live signed advisory ingestion and exact digest ban persistence passed against Marketplace-published artifacts.'
     fi
   else
     core_status=$?
