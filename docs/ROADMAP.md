@@ -1,13 +1,13 @@
 # Marketplace ↔ Core integration security roadmap
 
-This is the Marketplace-side progress ledger for the approved 2026-10-16 integration directive. It supplements the Artio Core v5.1 roadmap and preserves the existing Java 25, Zot, OCI, Core-owned lifecycle, and single development REST surface (`/api/v1`). It does not mark the system production-ready.
+This is the Marketplace-side progress ledger for the approved 2026-10-16 integration directive. It supplements the Artio Core v5.1 roadmap and preserves the existing Java 25, Zot, OCI, Core-owned lifecycle, single development REST surface (`/api/v1`), and one current development database schema snapshot (V1). Development schema changes update V1 in place; production migration history starts with the first production release. It does not mark the system production-ready.
 
 ## Current checkpoint: private staging and approved OCI promotion
 
 | Requirement | Status | Evidence / remaining work |
 |---|---|---|
 | Zot static ACLs: private `staging/**`, anonymous read-only `public/**`, dedicated promoter, default deny | PASS | Pinned Zot 2.1.21 live acceptance checked both gateway listeners; anonymous staging access and publisher public writes were denied. |
-| Promotion after independent approval, durable job, completeness before `PUBLISHED` | PASS for normal flow | Full Docker acceptance verified separate publisher/admin roles, job state `PUBLISHED:1`, final main/sidecar pulls and availability after Marketplace restart. Fault-injected interrupted copy/restart and concurrent moderation still need tests. |
+| Promotion after independent approval, durable job, completeness before `PUBLISHED` | PASS | Full Docker acceptance verified separate publisher/admin roles, job state `PUBLISHED:1`, final main/sidecar pulls and availability after Marketplace restart. PostgreSQL fault-injection tests cover partial OCI copy failure and retry, expired promotion lease recovery after restart, and moderation suspension racing final publication. Marketplace CI run `38943007707` passed these tests and the full live acceptance/cleanup gate. |
 | Nested OCI index and platform preservation | PASS | The v2 main image was an OCI index with `linux/amd64` and `linux/arm64`. Zot preserved the index and child digests; Docker pulled both platforms. An infrastructure unit test verifies recursive index copying. |
 | No unapproved descriptor/catalog exposure and no public access to new unapproved artifacts | PASS within tested Zot boundary | Acceptance denied the new release manifest before finalization across both listeners and tested digest reuse without granting release install eligibility. Partially public bytes after approval remain the explicitly documented Zot static-ACL limitation. |
 | Signed immutable release descriptor and Core-side official provenance verification | PASS for the local trust path | Live Docker acceptance signed four releases, rejected unsigned descriptors, and verified Core's trusted-key, canonical manifest digest, route identity and exact OCI image inventory checks while importing the Marketplace manifest. Production signing-key rotation and recovery drill remains OPEN. |
@@ -19,6 +19,7 @@ This is the Marketplace-side progress ledger for the approved 2026-10-16 integra
 ## Verified local checkpoint (2026-10-16)
 
 - `./gradlew.bat spotlessCheck build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification --no-daemon` — PASS.
+- `./gradlew.bat --no-daemon :marketplace-server:test --tests io.artio.marketplace.server.PublicationRecoveryPostgresIntegrationTest` — PASS (three PostgreSQL scenarios against the one current V1 schema). Marketplace CI run `38943007707` also passed the complete build, live acceptance and scoped stack cleanup.
 - `bash ./scripts/docker-acceptance.sh` against the uniquely named Zot/Marketplace stack — PASS, including private staging, two-party review, approved OCI promotion, multi-platform index, sidecar, SemVer/catalog/moderation/revocation, restricted plugin invocation, outage behavior and proxy limits.
 - `scripts/run-signed-descriptor-acceptance.ps1` — PASS, including Ed25519 release signing and verified Core-side Marketplace import; Core's selected Docker runtime integration suite passed (fixture-gated egress test skipped), and `:artio-rest-api:test` passed. The named acceptance project's containers, network and three volumes, locally built `artio-marketplace:local` image, generated OCI test tags and temporary signing credentials were removed; pre-existing Docker resources were retained.
 - `./gradlew.bat :artio-rest-api:integrationTest --tests io.artio.api.extensions.DockerExtensionRuntimeIntegrationTests --tests io.artio.api.catalog.CatalogApiIntegrationTests.extensionLifecycleEnforcesDependencyStateAndVersionBeforeRuntimeCalls --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured --no-daemon` — the integration task ran 6 tests: 5 passed, 1 fixture-gated egress test skipped. A later invocation reported the combined build successful after the Core API unit suite passed 162/162.
@@ -27,8 +28,7 @@ This is the Marketplace-side progress ledger for the approved 2026-10-16 integra
 
 ## Next dependency order
 
-1. Add fault-injected publication recovery tests for interrupted OCI copy/restart and moderation racing promotion.
-2. Complete production signing-key rotation and recovery drills for release descriptors and advisory snapshots.
-3. Finish Core installation channels for private-registry credentials and quarantine-scoped local OCI/Docker archives, keeping official provenance checks server-side.
-4. Complete a live Marketplace-retrieved v2 install, invocation, per-instance upgrade/rollback and Backoffice job-diagnostic acceptance.
-5. Resolve the separately tracked Core packaged-controller integration failure, then continue remaining Master Plan work in dependency order.
+1. Complete signing-key rotation and recovery drills for release descriptors and advisory snapshots using isolated generated keys.
+2. Finish Core installation channels for private-registry credentials and quarantine-scoped local OCI/Docker archives, keeping official provenance checks server-side.
+3. Complete a live Marketplace-retrieved v2 install, invocation, per-instance upgrade/rollback and Backoffice job-diagnostic acceptance.
+4. Resolve the separately tracked Core packaged-controller integration failure, then continue remaining Master Plan work in dependency order.

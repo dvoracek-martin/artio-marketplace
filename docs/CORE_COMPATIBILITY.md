@@ -28,6 +28,10 @@ Core's extension management and Marketplace proxy controllers are versioned unde
 
 Marketplace CI run `38941144533` passed with Core commit `eb3d79e355d1db9b150d64bfee93ec61a19d3802`. It provisioned a feed-specific Ed25519 key, revoked `marketplace.reference@1.2.9`, then had Core fetch, verify and persist that live signed snapshot and its permanent image-digest ban. The same run passed Marketplace manifest import and the selected restricted Docker runtime tests; the fixture-gated egress test remains skipped. The published advisory feed deduplicates image digests when a release uses the same digest for multiple roles, matching Core's strict signed-inventory validation.
 
+## Publication recovery acceptance
+
+Marketplace CI run `38943007707` passed `PublicationRecoveryPostgresIntegrationTest` against the current single V1 schema snapshot. It injects a partial OCI copy failure and retries the same approved release, recovers an expired promotion reservation after process interruption, and races a plugin moderation suspension against publication finalization. Each failed attempt remains retryable and cannot mark the release `PUBLISHED` until the full promotion and final moderation check pass. The same workflow passed the live Zot/Marketplace acceptance, backup/restore smoke pull, vulnerability scan and ephemeral Compose cleanup. No incremental schema or V1-to-V2 upgrade migration is part of this gate.
+
 ## Template review
 
 `stripe-payments`, `swiss-post`, `opensearch-search`, and `observability` templates use the same `manifestVersion: "1"` structure. Their image fields contain `REPLACE_WITH_PUBLISHED_IMAGE_DIGEST`; these are build/publish templates and not valid distributable release references. OpenSearch has one sidecar; Observability declares four and includes startup dependencies and persistent paths. The Marketplace rejects placeholders and verifies all image descriptors in Zot.
