@@ -59,7 +59,7 @@ wrong_origin_status=$(curl --silent --show-error -o "$tmp/origin-response.json" 
 forged_host_status=$(curl --silent --show-error -o "$tmp/host-response.html" -w '%{http_code}' \
   -H 'Host: marketplace.attacker.example' -H 'Origin: http://marketplace.attacker.example' \
   "$api_base/api/v1/dev-admin/session")
-[[ "$forged_host_status" == 400 || "$forged_host_status" == 404 ]] || {
+[[ "$forged_host_status" == 400 || "$forged_host_status" == 403 || "$forged_host_status" == 404 ]] || {
   echo "Forged Host was not rejected (HTTP $forged_host_status): $(cat "$tmp/host-response.html")" >&2
   exit 1
 }
