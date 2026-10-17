@@ -150,9 +150,9 @@ jobs:
           sed -i -e 's/^MARKETPLACE_API_PORT=.*/MARKETPLACE_API_PORT=18080/' \
             -e 's/^MARKETPLACE_MANAGEMENT_PORT=.*/MARKETPLACE_MANAGEMENT_PORT=18081/' \
             -e 's/^MARKETPLACE_REGISTRY_PORT=.*/MARKETPLACE_REGISTRY_PORT=15000/' \
-            -e 's/^MARKETPLACE_REGISTRY_PUBLISH_PORT=.*/MARKETPLACE_REGISTRY_PUBLISH_PORT=15001/' \
             -e 's/^MARKETPLACE_REGISTRY_HOST=.*/MARKETPLACE_REGISTRY_HOST=localhost:15000/' \
             .env.dev
+          printf '\nMARKETPLACE_REGISTRY_PUBLISH_PORT=15001\n' >> .env.dev
           docker compose --project-name "$MARKETPLACE_DEV_PROJECT" --env-file .env.dev \
             -f deployment/compose.yaml -f deployment/compose.dev.yaml up --build -d
           bash ./scripts/dev-admin-acceptance.sh
