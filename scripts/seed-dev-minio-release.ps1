@@ -38,6 +38,31 @@ function Get-Sha256File([string]$Path) {
   }
 }
 
+function ConvertTo-CanonicalJson([object]$Value) {
+  if ($null -eq $Value) { return 'null' }
+  if ($Value -is [System.Collections.IDictionary]) {
+    $parts = foreach ($key in ($Value.Keys | Sort-Object -CaseSensitive)) {
+      $escapedKey = ConvertTo-Json -InputObject ([string]$key) -Compress
+      $escapedValue = ConvertTo-CanonicalJson $Value[$key]
+      "${escapedKey}:$escapedValue"
+    }
+    return '{' + ($parts -join ',') + '}'
+  }
+  if ($Value -is [System.Management.Automation.PSCustomObject]) {
+    $parts = foreach ($property in ($Value.PSObject.Properties | Sort-Object Name -CaseSensitive)) {
+      $escapedKey = ConvertTo-Json -InputObject $property.Name -Compress
+      $escapedValue = ConvertTo-CanonicalJson $property.Value
+      "${escapedKey}:$escapedValue"
+    }
+    return '{' + ($parts -join ',') + '}'
+  }
+  if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+    $items = foreach ($item in $Value) { ConvertTo-CanonicalJson $item }
+    return '[' + ($items -join ',') + ']'
+  }
+  return ConvertTo-Json -InputObject $Value -Compress
+}
+
 function Push-Image([string]$Tag) {
   $output = @(& docker push $Tag 2>&1)
   $exit = $LASTEXITCODE
@@ -191,6 +216,40 @@ $catalogBody = $catalog | ConvertTo-Json -Depth 100 -Compress
 $submission = @{ manifest = $manifest; catalog = $catalog } | ConvertTo-Json -Depth 100 -Compress
 $validation = Invoke-JsonApi 'Post' "$marketplaceUrl/api/v1/admin/marketplace/releases/validate" $publisherHeaders $submission
 if (-not $validation.valid) { throw "Marketplace rejected the MinIO dev seed: $($validation.errors -join '; ')" }
+
+# A published Marketplace release is immutable. Reusing the exact release avoids
+# treating PowerShell JSON formatting changes as a new submission for the same version.
+if (Test-Path -LiteralPath $releaseEvidencePath) {
+  $existingEvidence = Get-Content -Raw -LiteralPath $releaseEvidencePath | ConvertFrom-Json
+  if ($existingEvidence.pluginId -eq $pluginId -and $existingEvidence.version -eq $version -and $existingEvidence.releaseId) {
+    $adminHeaders = @{ Authorization = "Bearer $((Get-Content -Raw -LiteralPath (Join-Path $stateDirectory 'admin-token.txt')).Trim())" }
+    $reviewUri = "$marketplaceUrl/api/v1/admin/marketplace/releases/$($existingEvidence.releaseId)/review"
+    try {
+      $existingReview = Invoke-RestMethod -Method Get -Uri $reviewUri -Headers $adminHeaders
+      $published = Invoke-RestMethod -Uri "$marketplaceUrl/api/v1/marketplace/plugins/$pluginId/releases/$version/descriptor"
+    } catch {
+      throw "Could not verify the previously seeded MinIO release ${version}: $($_.Exception.Message)"
+    }
+
+    $trustedKeyLine = Get-Content -LiteralPath (Join-Path $stateDirectory 'release-trusted-key.txt') | Select-Object -First 1
+    $trustedKeyId = ($trustedKeyLine -split '=', 2)[0]
+    $expectedCatalog = New-Catalog ([string]$existingReview.catalog.icon)
+    $sameRelease = $existingReview.state -eq 'PUBLISHED' -and
+      $existingReview.approvalState -eq 'APPROVED' -and
+      $existingReview.manifestSha256 -eq $validation.manifestDigest -and
+      (ConvertTo-CanonicalJson $expectedCatalog) -ceq (ConvertTo-CanonicalJson $existingReview.catalog) -and
+      $published.descriptor.pluginId -eq $pluginId -and
+      $published.descriptor.version -eq $version -and
+      $published.signature.keyId -eq $trustedKeyId
+    if ($sameRelease) {
+      Write-Host "Owner-authorized development release is already APPROVED and installable: $pluginId@$version"
+      Write-Host "Reusing immutable Marketplace release ID: $($existingEvidence.releaseId)"
+      return
+    }
+    throw "Marketplace already contains a different immutable $pluginId@$version release. Bump version in manifest-v2.template.json and this seed script before publishing changed content."
+  }
+}
+
 $manifestFileHash = Get-Sha256File $manifestPath
 $requestKey = "dev-seed-$pluginId-$version-$manifestFileHash"
 $releaseHeaders = $publisherHeaders + @{ 'Idempotency-Key' = $requestKey }
