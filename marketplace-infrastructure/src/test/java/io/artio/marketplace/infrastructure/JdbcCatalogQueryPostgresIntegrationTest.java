@@ -111,6 +111,38 @@ class JdbcCatalogQueryPostgresIntegrationTest {
         0, catalog.plugins("com.ex.v2", null, "CH", "2.1.0", false, "en", 0, 20).totalElements());
   }
 
+  @Test
+  void approvedPresentationRevisionOverlaysCatalogButPreservesReleaseNotesSnapshot() {
+    plugin("com.ex.revision", "revision");
+    release("com.ex.revision", "1.0.0", "1.0.0", "9.9.9", "2026-01-01T00:00:00Z", "PUBLISHED");
+    String metadata =
+        """
+        {"schemaVersion":1,"categories":["other"],"title":{"en":"Rebranded plugin"},"tagline":{"en":"Updated tagline"},"releaseNotes":{"en":"must not replace release snapshot"}}
+        """;
+    String revisionId = UUID.randomUUID().toString();
+    jdbc.update(
+        "INSERT INTO marketplace_listing_revisions(revision_id,plugin_id,revision_number,metadata,approval_state,created_by,expected_listing_version,approved_by,approved_at,approval_reason) VALUES (?::uuid,?,1,?::jsonb,'APPROVED','admin',0,'admin',now(),'approved listing copy')",
+        revisionId,
+        "com.ex.revision",
+        metadata);
+    jdbc.update(
+        "UPDATE marketplace_plugins SET effective_listing_revision_id=?::uuid,listing_revision_version=1 WHERE plugin_id='com.ex.revision'",
+        revisionId);
+
+    var catalogCard =
+        catalog
+            .plugins("com.ex.revision", null, null, null, false, "en", 0, 20)
+            .content()
+            .getFirst();
+    @SuppressWarnings("unchecked")
+    var publicMetadata = (java.util.Map<String, Object>) catalogCard.get("metadata");
+    assertEquals("Rebranded plugin", publicMetadata.get("title"));
+    assertEquals(
+        "test",
+        catalogCard.get("releaseNotes"),
+        "release notes must remain the immutable original release snapshot");
+  }
+
   private String cardVersion(
       io.artio.marketplace.application.CatalogQuery.Page page, String pluginId) {
     return page.content().stream()

@@ -1,6 +1,26 @@
 services:
   marketplace:
+    image: artio-marketplace:dev-local
+    build:
+      target: dev
+    environment:
+      SPRING_PROFILES_ACTIVE: marketplace-local-dev
+      MARKETPLACE_LOCAL_SIGNING_KEY_FILE: /run/secrets/local_release_signing_key
+      MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE: /run/secrets/zot_importer_password
+      MARKETPLACE_LOCAL_QUARANTINE_ROOT: /var/lib/artio-marketplace/quarantine
     volumes:
       # Keep the Zot web UI and its required search extension opt-in for local
       # development; production uses the UI-disabled config baked into the image.
       - ./zot/config.dev.json:/etc/zot/config.json:ro
+      - type: bind
+        source: ${MARKETPLACE_LOCAL_SIGNING_KEY_FILE:?Set MARKETPLACE_LOCAL_SIGNING_KEY_FILE to the persisted local release key}
+        target: /run/secrets/local_release_signing_key
+        read_only: true
+      - type: bind
+        source: ${MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE:?Set MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE to the staging-only importer password file}
+        target: /run/secrets/zot_importer_password
+        read_only: true
+      - marketplace_quarantine:/var/lib/artio-marketplace/quarantine
+
+volumes:
+  marketplace_quarantine:

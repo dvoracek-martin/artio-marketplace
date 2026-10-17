@@ -4,6 +4,10 @@
 .idea
 .env
 secrets
+.local-marketplace
+**/.local-marketplace
+marketplace-admin-ui/node_modules
+marketplace-admin-ui/dist
 artio-core
 data
 **/build

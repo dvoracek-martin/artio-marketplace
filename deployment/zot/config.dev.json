@@ -18,7 +18,7 @@
       "repositories": {
         "staging/**": {
           "policies": [
-            { "users": ["publisher", "promoter"], "actions": ["read", "create", "update"] }
+            { "users": ["publisher", "promoter", "oci-importer"], "actions": ["read", "create", "update"] }
           ]
         },
         "public/**": {

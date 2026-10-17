@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "newProjectRoot": "projects",
+  "projects": {
+    "marketplace-dev-admin": {
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "src",
+      "prefix": "ama",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "src/main.ts",
+            "index": "src/index.html",
+            "tsConfig": "tsconfig.app.json",
+            "polyfills": ["zone.js"],
+            "styles": ["src/styles.css"],
+            "outputPath": "dist"
+          },
+          "configurations": { "production": { "optimization": true, "outputHashing": "all", "budgets": [{"type":"initial","maximumWarning":"500kb","maximumError":"1mb"}] }, "development": { "optimization": false, "sourceMap": true } },
+          "defaultConfiguration": "production"
+        },
+        "test": { "builder": "@angular/build:unit-test", "options": { "tsConfig": "tsconfig.spec.json", "runner": "vitest" } }
+      }
+    }
+  }
+}

@@ -28,6 +28,10 @@ public class SecurityConfiguration {
                     // The controller applies distinct constant-time API-key checks for each role.
                     .requestMatchers("/api/v1/admin/marketplace/**")
                     .permitAll()
+                    // Handlers are registered only by marketplace-local-dev; without the profile
+                    // these routes have no mapping and return 404.
+                    .requestMatchers("/api/v1/dev-admin/**", "/dev-admin/**")
+                    .permitAll()
                     .requestMatchers("/actuator/health/liveness", "/actuator/health/readiness")
                     .permitAll()
                     .anyRequest()

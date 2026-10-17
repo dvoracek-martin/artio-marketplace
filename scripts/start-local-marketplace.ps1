@@ -8,6 +8,7 @@ $credentialsFile = Join-Path $stateDirectory 'credentials.txt'
 $advisoryTrustedKeyFile = Join-Path $stateDirectory 'advisory-trusted-key.txt'
 $releaseTrustedKeyFile = Join-Path $stateDirectory 'release-trusted-key.txt'
 $releaseSigningKeyFile = Join-Path $stateDirectory 'release-signing-key.pem'
+$importerPasswordFile = Join-Path $stateDirectory 'zot-importer-password.txt'
 $signingIngestTokenFile = Join-Path $stateDirectory 'signing-ingest-token.txt'
 $composeFile = Join-Path $repoRoot 'deployment/compose.yaml'
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -242,6 +243,7 @@ These are local secrets. Do not share them or commit this folder.
   Write-Utf8File $envFile (($envValues -join "`n") + "`n")
   Write-Utf8File (Join-Path $stateDirectory 'connection.txt') @"
 Marketplace API:       http://127.0.0.1:$apiPort
+Marketplace admin:     http://127.0.0.1:$apiPort/dev-admin/
 Readiness:             http://127.0.0.1:$managementPort/actuator/health/readiness
 Public OCI registry:   localhost:$registryPort
 Zot registry UI:       http://127.0.0.1:$registryPort
@@ -283,6 +285,46 @@ if (-not $hasPromotionPassword -or -not $hasPromoter) {
   }
 }
 
+# Keep the archive importer separate from publisher and promoter credentials; Zot grants it
+# staging-only access in the development configuration. Never rewrite an existing password.
+$hasImporterPassword = Test-Path -LiteralPath $importerPasswordFile
+$hasImporterUser = Select-String -LiteralPath $htpasswdFile -Pattern '^oci-importer:\$2[aby]\$' -Quiet
+if (-not $hasImporterPassword -or -not $hasImporterUser) {
+  if ($hasImporterPassword -xor $hasImporterUser) {
+    throw 'The local Zot importer credential is incomplete. Review .local-marketplace before continuing; no existing secret was rotated.'
+  }
+  $importerPassword = New-RandomHex
+  $httpdImage = 'httpd:2.4-alpine'
+  $httpdImageWasPresent = Test-DockerCommand "image inspect $httpdImage"
+  try {
+    $zotImporterEntry = $importerPassword | docker run --rm -i --entrypoint htpasswd $httpdImage -Bbn -C 12 -i oci-importer
+    if ($LASTEXITCODE -ne 0 -or -not $zotImporterEntry -or $zotImporterEntry -notmatch '^oci-importer:\$2[aby]\$') {
+      throw 'Could not generate the Zot staging-only importer credential.'
+    }
+    $htpasswdEntries = @(Get-Content -LiteralPath $htpasswdFile | Where-Object { $_ -notmatch '^oci-importer:' })
+    $htpasswdEntries += $zotImporterEntry.Trim()
+    Write-Utf8File $htpasswdFile (($htpasswdEntries -join "`n") + "`n")
+    Write-Utf8File $importerPasswordFile ($importerPassword + "`n")
+    Protect-LocalSecretFile $importerPasswordFile
+    $credentialText = Get-Content -Raw -LiteralPath $credentialsFile
+    if ($credentialText -notmatch 'zot-importer-password\.txt') {
+      Write-Utf8File $credentialsFile ($credentialText.TrimEnd() + "`nZot staging-only OCI importer password: zot-importer-password.txt`n")
+    }
+  } finally {
+    if (-not $httpdImageWasPresent) { Test-DockerCommand "image rm $httpdImage" | Out-Null }
+  }
+  $envContents = @(Get-Content -LiteralPath $envFile | Where-Object { $_ -notmatch '^MARKETPLACE_LOCAL_(SIGNING_KEY_FILE|IMPORTER_PASSWORD_FILE)=' })
+  $envContents += 'MARKETPLACE_LOCAL_SIGNING_KEY_FILE=../.local-marketplace/release-signing-key.pem'
+  $envContents += 'MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE=../.local-marketplace/zot-importer-password.txt'
+  Write-Utf8File $envFile (($envContents -join "`n") + "`n")
+}
+if (-not (Select-String -LiteralPath $envFile -Pattern '^MARKETPLACE_LOCAL_SIGNING_KEY_FILE=.+$' -Quiet)) {
+  Add-Content -LiteralPath $envFile -Value 'MARKETPLACE_LOCAL_SIGNING_KEY_FILE=../.local-marketplace/release-signing-key.pem' -Encoding utf8
+}
+if (-not (Select-String -LiteralPath $envFile -Pattern '^MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE=.+$' -Quiet)) {
+  Add-Content -LiteralPath $envFile -Value 'MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE=../.local-marketplace/zot-importer-password.txt' -Encoding utf8
+}
+
 Set-ComposeEnvironmentFromFile $envFile
 $composeArgs = @('--project-name', 'artio-marketplace-local', '--env-file', $envFile, '-f', $composeFile, '-f', (Join-Path $repoRoot 'deployment/compose.dev.yaml'))
 Write-Host 'Building and starting Marketplace, PostgreSQL, Zot (including its local web UI), and the registry gateway...'
@@ -320,10 +362,19 @@ Write-Host 'Marketplace is ready.' -ForegroundColor Green
 Get-Content -LiteralPath (Join-Path $stateDirectory 'connection.txt')
 Write-Host "Core advisory trust key: $advisoryTrustedKeyFile"
 Write-Host "Core release trust key: $releaseTrustedKeyFile"
+Write-Host "Admin GUI:             http://127.0.0.1:$apiPort/dev-admin/"
 Write-Host "Zot registry UI:      http://127.0.0.1:$registryPort"
 Write-Host "Local API credentials: $stateDirectory (publisher-token.txt, admin-token.txt, revocation-token.txt)"
 Write-Host 'Keep that folder private. Stop with: docker compose --project-name artio-marketplace-local --env-file .local-marketplace/.env -f deployment/compose.yaml down'
 
-$env:MARKETPLACE_DEV_SEED_PROFILE = 'local-development'
-& (Join-Path $repoRoot 'scripts/seed-dev-minio-release.ps1') -CorePath (Join-Path $repoRoot '..\Artio')
-if ($LASTEXITCODE -ne 0) { throw 'The owner-authorized local MinIO development seed failed.' }
+if ($env:MARKETPLACE_DEV_SEED_CORE_MINIO -eq 'true') {
+  $corePath = Join-Path $repoRoot '..\Artio'
+  if (-not (Test-Path -LiteralPath (Join-Path $corePath 'artio-plugins/minio-object-storage'))) {
+    throw 'MARKETPLACE_DEV_SEED_CORE_MINIO=true requires the sibling Artio plugin worktree.'
+  }
+  $env:MARKETPLACE_DEV_SEED_PROFILE = 'local-development'
+  & (Join-Path $repoRoot 'scripts/seed-dev-minio-release.ps1') -CorePath $corePath
+  if ($LASTEXITCODE -ne 0) { throw 'The opt-in local MinIO development seed failed.' }
+} else {
+  Write-Host 'No Core checkout or running Core is required. To seed the optional MinIO sample release, set MARKETPLACE_DEV_SEED_CORE_MINIO=true.'
+}

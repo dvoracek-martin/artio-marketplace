@@ -3,6 +3,9 @@
 .local-marketplace/
 secrets/
 **/build/
+**/node_modules/
+**/.angular/
+marketplace-admin-ui/dist/
 .gradle/
 .gradle-cache/
 .idea/

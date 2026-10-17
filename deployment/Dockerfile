@@ -3,9 +3,16 @@ WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/root/.gradle chmod +x gradlew && ./gradlew --no-daemon :marketplace-server:bootJar
 
+FROM node:24.20.0-bookworm-slim AS ui-build
+WORKDIR /ui
+COPY marketplace-admin-ui/package.json marketplace-admin-ui/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY marketplace-admin-ui/ ./
+RUN npm run build
+
 FROM ghcr.io/project-zot/zot@sha256:96cda11459ce6f8c60da3b03f03e9f67fd11b3ae2d82c4c04c92b3c608996080 AS zot
 
-FROM eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab
+FROM eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab AS production
 ENV HOME=/tmp LANG=C.UTF-8
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /src/marketplace-server/build/libs/marketplace-server-0.1.0-SNAPSHOT.jar /app/marketplace.jar
@@ -17,3 +24,14 @@ EXPOSE 8080 5000
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=15s --timeout=4s --start-period=45s --retries=3 CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"]
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-Djava.io.tmpdir=/tmp", "-jar", "/app/marketplace.jar"]
+
+# Only the opt-in developer Compose overlay uses this target. Production does not
+# contain the no-login UI, importer binary, key mount, or quarantine volume.
+FROM production AS dev
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends skopeo=1.13.3+ds1-2ubuntu0.24.04.3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/dev-static /var/lib/artio-marketplace/quarantine \
+    && chown -R 10001:10001 /app/dev-static /var/lib/artio-marketplace/quarantine
+COPY --from=ui-build --chown=10001:10001 /ui/dist/browser/ /app/dev-static/
+USER 10001:10001

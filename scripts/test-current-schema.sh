@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export MSYS_NO_PATHCONV=1
 
 container="marketplace-current-schema-${GITHUB_RUN_ID:-local}-$$"
 image='postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
@@ -16,6 +17,15 @@ docker exec "$container" pg_isready -U postgres >/dev/null
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < marketplace-infrastructure/src/main/resources/db/migration/V1__marketplace.sql
 
+# Add pre-existing content before the forward migration and confirm V2 preserves it.
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+INSERT INTO marketplace_plugins(plugin_id,slug,vendor) VALUES ('migration.fixture','migration-fixture','Migration fixture');
+INSERT INTO marketplace_releases(release_id,plugin_id,version,manifest,manifest_document,manifest_sha256,metadata,publication_state,create_request_sha256,published_at)
+VALUES ('11111111-1111-4111-8111-111111111111','migration.fixture','1.0.0','{}'::jsonb,'{}','0000000000000000000000000000000000000000000000000000000000000000','{}'::jsonb,'PUBLISHED','0000000000000000000000000000000000000000000000000000000000000000',now());
+SQL
+docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  < marketplace-infrastructure/src/main/resources/db/migration/V2__local_dev_admin_imports_and_listing_revisions.sql
+
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
 DO $$
 DECLARE object_count integer; feed_sequence bigint; compare_result integer;
@@ -24,8 +34,9 @@ BEGIN
   WHERE table_schema='public' AND table_name IN (
     'marketplace_plugins','marketplace_releases','marketplace_media_assets','marketplace_audit',
     'publication_promotions','release_signatures','marketplace_advisory_feed_state',
-    'marketplace_release_advisory_events');
-  IF object_count <> 8 THEN RAISE EXCEPTION 'current V1 schema is incomplete: found % tables', object_count; END IF;
+    'marketplace_release_advisory_events','marketplace_dev_import_jobs',
+    'marketplace_dev_import_archives','marketplace_dev_import_artifacts','marketplace_listing_revisions');
+  IF object_count <> 12 THEN RAISE EXCEPTION 'V1-V2 schema is incomplete: found % tables', object_count; END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public'
       AND table_name='marketplace_plugins' AND column_name='listing_state') THEN
     RAISE EXCEPTION 'obsolete plugin listing state remains in the current schema';
@@ -41,7 +52,13 @@ BEGIN
   IF marketplace_semver_sort_key('1.10.0') COLLATE "C" <= marketplace_semver_sort_key('1.9.9') COLLATE "C" THEN
     RAISE EXCEPTION 'SemVer sort key failed';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM marketplace_dev_import_jobs) OR NOT EXISTS (SELECT 1 FROM marketplace_listing_revisions) THEN
+    RAISE EXCEPTION 'V2 local administration tables were not created';
+  END IF;
+  IF (SELECT count(*) FROM marketplace_releases WHERE plugin_id='migration.fixture' AND version='1.0.0') <> 1 THEN
+    RAISE EXCEPTION 'forward migration did not preserve the existing published release';
+  END IF;
 END $$;
 SQL
 
-echo 'Current V1 schema test passed: all Marketplace tables/functions are available from the single development schema snapshot.'
+echo 'V1-to-V2 forward migration test passed: developer administration tables were added and existing Marketplace releases were preserved.'

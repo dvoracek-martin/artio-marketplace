@@ -135,8 +135,9 @@ public class JdbcCatalogQuery implements CatalogQuery {
     args.add(page * size);
     var rows =
         jdbc.query(
-            "SELECT r.version,r.metadata::text,r.published_at FROM marketplace_releases r"
+            "SELECT r.version,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text,r.published_at FROM marketplace_releases r"
                 + " JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + " LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'"
                 + filter
                 + " ORDER BY "
                 + SqlReleaseSelectionPolicy.orderBy("r")
@@ -173,8 +174,9 @@ public class JdbcCatalogQuery implements CatalogQuery {
     SemanticVersion.parse(version);
     var rows =
         jdbc.query(
-            "SELECT r.manifest_document AS manifest,r.metadata::text,r.published_at,p.slug,p.vendor"
+            "SELECT r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text,r.published_at,p.slug,p.vendor"
                 + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + " LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'"
                 + " WHERE r.plugin_id=? AND r.version=? AND "
                 + SqlReleaseSelectionPolicy.eligible("r", "p"),
             (rs, n) ->
@@ -198,8 +200,9 @@ public class JdbcCatalogQuery implements CatalogQuery {
     validate("en", coreVersion, country);
     var rows =
         jdbc.query(
-            "SELECT r.version,r.manifest_document AS manifest,r.metadata::text,r.published_at,p.slug,p.vendor"
+            "SELECT r.version,r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text,r.published_at,p.slug,p.vendor"
                 + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
+                + " LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'"
                 + " WHERE r.plugin_id=? AND "
                 + SqlReleaseSelectionPolicy.eligible("r", "p")
                 + " ORDER BY "
@@ -222,8 +225,8 @@ public class JdbcCatalogQuery implements CatalogQuery {
   }
 
   private String latestLateral() {
-    return "SELECT r.version,r.manifest,r.manifest_document,r.metadata,r.published_at"
-        + " FROM marketplace_releases r WHERE r.plugin_id=p.plugin_id AND "
+    return "SELECT r.version,r.manifest,r.manifest_document,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata) AS metadata,r.published_at"
+        + " FROM marketplace_releases r LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED' WHERE r.plugin_id=p.plugin_id AND "
         + SqlReleaseSelectionPolicy.eligible("r", "p")
         + " ORDER BY "
         + SqlReleaseSelectionPolicy.orderBy("r")

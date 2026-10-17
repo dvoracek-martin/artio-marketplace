@@ -29,11 +29,19 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: actions/setup-node@1e60f620b9541d7e95a50c0e9780d7c0f690b3e7 # v4.0.4
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: marketplace-admin-ui/package-lock.json
+      - name: Test and build the development-only admin console
+        working-directory: marketplace-admin-ui
+        run: npm ci --ignore-scripts && npm test && npm run build
       - name: Compile, format, unit and architecture checks, coverage
         run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
       - name: Lint OpenAPI 3.1 contract
         run: npx --yes @redocly/cli@1.34.5 lint marketplace-contract/openapi.yaml
-      - name: Verify the single current V1 schema on disposable PostgreSQL
+      - name: Verify V1-to-V2 migration preserves existing releases on disposable PostgreSQL
         run: bash ./scripts/test-current-schema.sh
       - name: Prepare isolated Docker acceptance credentials
         shell: bash
@@ -48,6 +56,7 @@ jobs:
           advisory_signing_key_id=ci-advisory-2026
           zot_password=$(openssl rand -hex 32)
           promoter_password=$(openssl rand -hex 32)
+          importer_password=$(openssl rand -hex 32)
           postgres_password=$(openssl rand -hex 32)
           echo "::add-mask::$publisher_token"
           echo "::add-mask::$admin_token"
@@ -55,6 +64,7 @@ jobs:
           echo "::add-mask::$signing_token"
           echo "::add-mask::$zot_password"
           echo "::add-mask::$promoter_password"
+          echo "::add-mask::$importer_password"
           echo "::add-mask::$postgres_password"
           printf '%s\n' "$publisher_token" > secrets/publisher-token.txt
           printf '%s\n' "$admin_token" > secrets/admin-token.txt
@@ -69,6 +79,9 @@ jobs:
           chmod 600 secrets/advisory-signing-key.pem
           printf '%s\n' "$zot_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i publisher > secrets/zot.htpasswd
           printf '%s\n' "$promoter_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i promoter >> secrets/zot.htpasswd
+          printf '%s\n' "$importer_password" | docker run --rm -i --entrypoint htpasswd httpd:2.4-alpine -Bbn -i oci-importer >> secrets/zot.htpasswd
+          printf '%s\n' "$importer_password" > secrets/zot-importer-password.txt
+          chmod 600 secrets/zot-importer-password.txt
           token_hash=$(printf '%s' "$publisher_token" | sha256sum | cut -d' ' -f1)
           admin_token_hash=$(printf '%s' "$admin_token" | sha256sum | cut -d' ' -f1)
           revocation_token_hash=$(printf '%s' "$revocation_token" | sha256sum | cut -d' ' -f1)
@@ -80,6 +93,7 @@ jobs:
           MARKETPLACE_REVOCATION_TOKEN_SHA256=$revocation_token_hash
           MARKETPLACE_SIGNING_INGEST_TOKEN_SHA256=$signing_token_hash
           MARKETPLACE_SIGNING_TRUSTED_KEYS=$signing_key_id=$signing_public_key
+          MARKETPLACE_SIGNING_KEY_ID=$signing_key_id
           MARKETPLACE_ADVISORY_SIGNING_KEY_ID=$advisory_signing_key_id
           MARKETPLACE_ADVISORY_SIGNING_PRIVATE_KEY_BASE64=$advisory_private_key
           MARKETPLACE_ZOT_PROMOTION_USERNAME=promoter
@@ -87,8 +101,11 @@ jobs:
           MARKETPLACE_PUBLISHER_RATE_LIMIT_PER_MINUTE=200
           MARKETPLACE_REGISTRY_HOST=localhost:5000
           MARKETPLACE_API_PORT=8080
+          MARKETPLACE_MANAGEMENT_PORT=8081
           MARKETPLACE_REGISTRY_PORT=5000
           ZOT_HTPASSWD_FILE=$(pwd)/secrets/zot.htpasswd
+          MARKETPLACE_LOCAL_SIGNING_KEY_FILE=$(pwd)/secrets/release-signing-key.pem
+          MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE=$(pwd)/secrets/zot-importer-password.txt
           EOF
           echo "MARKETPLACE_ZOT_TEST_PASSWORD=$zot_password" >> "$GITHUB_ENV"
           echo "MARKETPLACE_ZOT_PROMOTION_TEST_PASSWORD=$promoter_password" >> "$GITHUB_ENV"
@@ -111,6 +128,8 @@ jobs:
         run: docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml up --build -d
       - name: Verify the acceptance gate fails closed
         run: bash ./scripts/test-acceptance-fail-closed.sh
+      - name: Verify production image disables the local admin console
+        run: bash ./scripts/test-production-dev-admin-disabled.sh
       - name: Exercise live Zot ACL, OCI publication and public API
         id: acceptance
         env:
@@ -121,6 +140,22 @@ jobs:
           MARKETPLACE_SIGNING_PRIVATE_KEY_FILE: ${{ github.workspace }}/secrets/release-signing-key.pem
           MARKETPLACE_SIGNING_KEY_ID: ci-acceptance-2026
         run: bash ./scripts/run-acceptance.sh
+      - name: Exercise isolated local admin UI and streamed OCI archive import
+        id: dev-admin-acceptance
+        env:
+          MARKETPLACE_DEV_PROJECT: marketplace-dev-admin-${{ github.run_id }}
+          MARKETPLACE_DEV_ENV_FILE: .env.dev
+        run: |
+          cp .env .env.dev
+          sed -i -e 's/^MARKETPLACE_API_PORT=.*/MARKETPLACE_API_PORT=18080/' \
+            -e 's/^MARKETPLACE_MANAGEMENT_PORT=.*/MARKETPLACE_MANAGEMENT_PORT=18081/' \
+            -e 's/^MARKETPLACE_REGISTRY_PORT=.*/MARKETPLACE_REGISTRY_PORT=15000/' \
+            -e 's/^MARKETPLACE_REGISTRY_PUBLISH_PORT=.*/MARKETPLACE_REGISTRY_PUBLISH_PORT=15001/' \
+            -e 's/^MARKETPLACE_REGISTRY_HOST=.*/MARKETPLACE_REGISTRY_HOST=localhost:15000/' \
+            .env.dev
+          docker compose --project-name "$MARKETPLACE_DEV_PROJECT" --env-file .env.dev \
+            -f deployment/compose.yaml -f deployment/compose.dev.yaml up --build -d
+          bash ./scripts/dev-admin-acceptance.sh
       - name: Restore isolated PostgreSQL, Zot and media backup and smoke-pull a published digest
         if: always() && !cancelled() && steps.start-stack.outcome == 'success'
         env:
@@ -171,4 +206,15 @@ jobs:
           MARKETPLACE_ZOT_PROMOTION_PASSWORD=ci-cleanup-only \
           ZOT_HTPASSWD_FILE=/tmp/ci-cleanup-only-htpasswd \
             docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file /dev/null -f deployment/compose.yaml down -v --remove-orphans
+      - name: Stop and remove isolated dev admin acceptance resources
+        if: always()
+        env:
+          MARKETPLACE_DEV_PROJECT: marketplace-dev-admin-${{ github.run_id }}
+          MARKETPLACE_DEV_ENV_FILE: .env.dev
+        run: |
+          if [ -f .env.dev ]; then
+            docker compose --project-name "$MARKETPLACE_DEV_PROJECT" --env-file .env.dev \
+              -f deployment/compose.yaml -f deployment/compose.dev.yaml down -v --remove-orphans
+          fi
+          docker image rm artio-marketplace:dev-local >/dev/null 2>&1 || true
 
