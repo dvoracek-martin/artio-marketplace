@@ -4,10 +4,19 @@ export MSYS_NO_PATHCONV=1
 
 container="marketplace-current-schema-${GITHUB_RUN_ID:-local}-$$"
 image='postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea'
-cleanup() { docker rm --force "$container" >/dev/null 2>&1 || true; }
+cleanup() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "Current-schema migration test failed (exit $status); PostgreSQL container diagnostics follow." >&2
+    docker inspect --format 'state={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}' "$container" >&2 || true
+    docker logs "$container" >&2 || true
+  fi
+  docker rm --force "$container" >/dev/null 2>&1 || true
+  return "$status"
+}
 trap cleanup EXIT
 
-docker run --detach --rm --name "$container" --tmpfs /var/lib/postgresql/data:rw,size=256m \
+docker run --detach --name "$container" --tmpfs /var/lib/postgresql/data:rw,size=256m \
   --env POSTGRES_PASSWORD=schema-test-only "$image" >/dev/null
 for _ in $(seq 1 60); do
   if docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; then break; fi
