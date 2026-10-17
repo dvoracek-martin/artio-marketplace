@@ -244,7 +244,7 @@ done
 # original release descriptor and runtime manifest.
 effective=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   "$api_base/api/v1/dev-admin/plugins/com.example.dev-import/effective-listing")
-listing_version=$(jq -r .version <<<"$effective")
+listing_version=$(jq -r .listingRevisionVersion <<<"$effective")
 original_metadata=$(jq -c .metadata <<<"$effective")
 original_title=$(jq -r '.metadata.title.en' <<<"$effective")
 baseline_revision=$(jq -cn --argjson metadata "$original_metadata" --argjson expected "$listing_version" \
