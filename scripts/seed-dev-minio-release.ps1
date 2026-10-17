@@ -224,29 +224,45 @@ if (Test-Path -LiteralPath $releaseEvidencePath) {
   if ($existingEvidence.pluginId -eq $pluginId -and $existingEvidence.version -eq $version -and $existingEvidence.releaseId) {
     $adminHeaders = @{ Authorization = "Bearer $((Get-Content -Raw -LiteralPath (Join-Path $stateDirectory 'admin-token.txt')).Trim())" }
     $reviewUri = "$marketplaceUrl/api/v1/admin/marketplace/releases/$($existingEvidence.releaseId)/review"
+    $existingReview = $null
     try {
       $existingReview = Invoke-RestMethod -Method Get -Uri $reviewUri -Headers $adminHeaders
-      $published = Invoke-RestMethod -Uri "$marketplaceUrl/api/v1/marketplace/plugins/$pluginId/releases/$version/descriptor"
     } catch {
-      throw "Could not verify the previously seeded MinIO release ${version}: $($_.Exception.Message)"
+      $statusCode = 0
+      if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+      }
+      if ($statusCode -eq 404) {
+        Write-Host "Previous MinIO release evidence points to a release absent from this Marketplace database; seeding $pluginId@$version from scratch."
+      } else {
+        throw "Could not verify the previously seeded MinIO release ${version}: $($_.Exception.Message)"
+      }
     }
 
-    $trustedKeyLine = Get-Content -LiteralPath (Join-Path $stateDirectory 'release-trusted-key.txt') | Select-Object -First 1
-    $trustedKeyId = ($trustedKeyLine -split '=', 2)[0]
-    $expectedCatalog = New-Catalog ([string]$existingReview.catalog.icon)
-    $sameRelease = $existingReview.state -eq 'PUBLISHED' -and
-      $existingReview.approvalState -eq 'APPROVED' -and
-      $existingReview.manifestSha256 -eq $validation.manifestDigest -and
-      (ConvertTo-CanonicalJson $expectedCatalog) -ceq (ConvertTo-CanonicalJson $existingReview.catalog) -and
-      $published.descriptor.pluginId -eq $pluginId -and
-      $published.descriptor.version -eq $version -and
-      $published.signature.keyId -eq $trustedKeyId
-    if ($sameRelease) {
-      Write-Host "Owner-authorized development release is already APPROVED and installable: $pluginId@$version"
-      Write-Host "Reusing immutable Marketplace release ID: $($existingEvidence.releaseId)"
-      return
+    if ($existingReview) {
+      try {
+        $published = Invoke-RestMethod -Uri "$marketplaceUrl/api/v1/marketplace/plugins/$pluginId/releases/$version/descriptor"
+      } catch {
+        throw "Could not verify the previously seeded MinIO release ${version}: $($_.Exception.Message)"
+      }
+
+      $trustedKeyLine = Get-Content -LiteralPath (Join-Path $stateDirectory 'release-trusted-key.txt') | Select-Object -First 1
+      $trustedKeyId = ($trustedKeyLine -split '=', 2)[0]
+      $expectedCatalog = New-Catalog ([string]$existingReview.catalog.icon)
+      $sameRelease = $existingReview.state -eq 'PUBLISHED' -and
+        $existingReview.approvalState -eq 'APPROVED' -and
+        $existingReview.manifestSha256 -eq $validation.manifestDigest -and
+        (ConvertTo-CanonicalJson $expectedCatalog) -ceq (ConvertTo-CanonicalJson $existingReview.catalog) -and
+        $published.descriptor.pluginId -eq $pluginId -and
+        $published.descriptor.version -eq $version -and
+        $published.signature.keyId -eq $trustedKeyId
+      if ($sameRelease) {
+        Write-Host "Owner-authorized development release is already APPROVED and installable: $pluginId@$version"
+        Write-Host "Reusing immutable Marketplace release ID: $($existingEvidence.releaseId)"
+        return
+      }
+      throw "Marketplace already contains a different immutable $pluginId@$version release. Bump version in manifest-v2.template.json and this seed script before publishing changed content."
     }
-    throw "Marketplace already contains a different immutable $pluginId@$version release. Bump version in manifest-v2.template.json and this seed script before publishing changed content."
   }
 }
 
