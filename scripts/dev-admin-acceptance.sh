@@ -747,6 +747,59 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   core_v3_reference=$(curl --silent --show-error --fail \
     "$api_base/api/v1/marketplace/plugins/$live_plugin_id/releases/1.4.0/manifest" | jq -er '.packageManifest.image')
   [[ "$core_v2_reference" == *@sha256:* && "$core_v3_reference" == *@sha256:* ]]
+
+  compatible_catalog=$(curl --silent --show-error --fail --get \
+    -b "$tmp/cookies/session.txt" "$api_base/api/v1/dev-admin/plugins/page" \
+    --data-urlencode 'page=0' --data-urlencode 'size=50' \
+    --data-urlencode "q=$live_plugin_id" --data-urlencode 'category=ALL' \
+    --data-urlencode 'moderation=ALL' --data-urlencode 'manifestVersion=2' \
+    --data-urlencode 'coreVersion=2.5.0' --data-urlencode 'country=CH' \
+    --data-urlencode 'releaseState=PUBLISHED' --data-urlencode 'approvalState=APPROVED' \
+    --data-urlencode 'signed=SIGNED')
+  jq -e --arg id "$live_plugin_id" \
+    '.totalElements == 1 and .content[0].pluginId == $id' <<<"$compatible_catalog" >/dev/null
+  incompatible_catalog=$(curl --silent --show-error --fail --get \
+    -b "$tmp/cookies/session.txt" "$api_base/api/v1/dev-admin/plugins/page" \
+    --data-urlencode 'page=0' --data-urlencode 'size=50' \
+    --data-urlencode "q=$live_plugin_id" --data-urlencode 'category=ALL' \
+    --data-urlencode 'moderation=ALL' --data-urlencode 'manifestVersion=2' \
+    --data-urlencode 'coreVersion=100.0.0' --data-urlencode 'country=CH' \
+    --data-urlencode 'releaseState=PUBLISHED' --data-urlencode 'approvalState=APPROVED' \
+    --data-urlencode 'signed=SIGNED')
+  jq -e '.totalElements == 0 and (.content | length == 0)' <<<"$incompatible_catalog" >/dev/null
+  echo 'Live admin catalog filters matched the signed Core v2 release and excluded an incompatible Core version.'
+
+  # Verify published references survive a Marketplace process restart while its
+  # persistent PostgreSQL, Zot and signing state remain intact.
+  docker compose --project-name "${MARKETPLACE_DEV_PROJECT:?}" \
+    --env-file "${MARKETPLACE_DEV_ENV_FILE:?}" \
+    -f deployment/compose.yaml -f deployment/compose.dev.yaml restart marketplace >/dev/null
+  for _ in $(seq 1 120); do
+    if curl --silent --fail "$management" | jq -e '.status == "UP"' >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+  curl --silent --show-error --fail "$management" | jq -e '.status == "UP"' >/dev/null
+  for version in 1.3.0 1.4.0; do
+    descriptor=$(curl --silent --show-error --fail \
+      "$api_base/api/v1/marketplace/plugins/$live_plugin_id/releases/$version/descriptor")
+    jq -e --arg id "$live_plugin_id" --arg version "$version" \
+      '.descriptor.pluginId == $id and .descriptor.version == $version and .signature.algorithm == "Ed25519" and (.signature.value|length > 20)' \
+      <<<"$descriptor" >/dev/null
+  done
+  manifest_after_restart=$(curl --silent --show-error --fail \
+    "$api_base/api/v1/marketplace/plugins/$live_plugin_id/releases/1.3.0/manifest")
+  jq -e --arg image "$core_v2_reference" '.packageManifest.image == $image' \
+    <<<"$manifest_after_restart" >/dev/null
+  core_v2_path=${core_v2_reference#localhost:$registry_port/}
+  core_v2_repository=${core_v2_path%@*}
+  core_v2_digest=${core_v2_path##*@}
+  curl --silent --show-error --fail --head \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "http://127.0.0.1:$registry_port/v2/$core_v2_repository/manifests/$core_v2_digest" \
+    > "$tmp/core-v2-after-restart.headers"
+  grep -qi "Docker-Content-Digest: $core_v2_digest" "$tmp/core-v2-after-restart.headers"
+  echo 'Signed Marketplace descriptors for both immutable releases remained available after Marketplace restart.'
+
   [[ -n ${MARKETPLACE_SIGNING_PRIVATE_KEY_FILE:-} && -f ${MARKETPLACE_SIGNING_PRIVATE_KEY_FILE:-} ]]
   [[ -n ${MARKETPLACE_SIGNING_KEY_ID:-} ]]
   signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER \
