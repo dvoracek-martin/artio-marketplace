@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class ApiErrors {
@@ -37,6 +38,19 @@ public class ApiErrors {
                 "INVALID_REQUEST",
                 "message",
                 e.getMessage(),
+                "requestId",
+                UUID.randomUUID().toString()));
+  }
+
+  @ExceptionHandler(NoResourceFoundException.class)
+  ResponseEntity<Map<String, Object>> missingResource(NoResourceFoundException e) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(
+            Map.of(
+                "code",
+                "NOT_FOUND",
+                "message",
+                "Resource not found",
                 "requestId",
                 UUID.randomUUID().toString()));
   }
