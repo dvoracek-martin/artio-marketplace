@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+trap 'status=$?; echo "Dev admin acceptance failed at script line ${BASH_LINENO[0]} (exit $status)." >&2' ERR
+
 api_base="${MARKETPLACE_DEV_API_BASE:-http://127.0.0.1:18080}"
 management="${MARKETPLACE_DEV_MANAGEMENT_URL:-http://127.0.0.1:18081/actuator/health/readiness}"
 registry_port="${MARKETPLACE_DEV_REGISTRY_PORT:-15000}"
