@@ -183,7 +183,12 @@ test('searches and filters catalog entries, then browses release states', async 
 
   await page.getByLabel('Hledat').fill(pluginId);
   await expect(analyticsPlugin).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'analytics', exact: true })).toBeVisible();
   await expect(securityPlugin).toHaveCount(0);
+  await page.getByRole('button', { name: 'Seznam' }).click();
+  await expect(page.getByRole('heading', { name: 'analytics', exact: true })).toHaveCount(0);
+  await expect(analyticsPlugin).toBeVisible();
+  await page.getByRole('button', { name: 'Kategorie' }).click();
   await page.getByLabel('Hledat').fill('');
   await page.getByLabel('Kategorie').selectOption('security');
   await expect(securityPlugin).toBeVisible();
