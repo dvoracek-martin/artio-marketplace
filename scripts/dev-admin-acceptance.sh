@@ -476,6 +476,84 @@ restored_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
   "$api_base/api/v1/marketplace/plugins/com.example.dev-import?locale=en")
 [[ "$restored_status" == 200 ]]
 echo 'Plugin suspension hides its public listing and the allowed restoration transition re-enables it.'
+
+# Publish a higher SemVer release with the same immutable OCI digests. This lets
+# acceptance verify release-scoped unlisting and terminal revocation behavior.
+second_manifest=$(jq '.version="1.0.1"' "$tmp/manifest.json")
+second_catalog=$(jq '.title.en="Dev Import Acceptance 1.0.1"' "$tmp/catalog.json")
+second_submission=$(jq -cn --argjson manifest "$second_manifest" --argjson catalog "$second_catalog" \
+  '{manifest:$manifest,catalog:$catalog}')
+second_validation=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  --data-binary "$second_submission" "$api_base/api/v1/dev-admin/releases/validate")
+jq -e '.valid == true and (.errors | length == 0)' <<<"$second_validation" >/dev/null || {
+  echo "Second release validation failed: $second_validation" >&2
+  exit 1
+}
+second_draft=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-second-release-$(openssl rand -hex 12)" \
+  --data-binary "$second_submission" "$api_base/api/v1/dev-admin/releases")
+second_release_id=$(jq -r .releaseId <<<"$second_draft")
+[[ "$second_release_id" =~ ^[0-9a-f-]{36}$ ]]
+second_asset=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -F "kind=icon" -F "file=@$tmp/icon.png;type=image/png" \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/assets")
+second_asset_id=$(jq -r .assetId <<<"$second_asset")
+[[ "$second_asset_id" =~ ^sha256-[a-f0-9]{64}$ ]]
+second_shot=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -F "kind=screenshot" -F "file=@$tmp/icon.png;type=image/png" \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/assets")
+second_shot_id=$(jq -r .assetId <<<"$second_shot")
+[[ "$second_shot_id" =~ ^sha256-[a-f0-9]{64}$ ]]
+second_catalog=$(jq --arg icon "$second_asset_id" --arg shot "$second_shot_id" \
+  '.icon=$icon | .screenshots[0].assetId=$shot' <<<"$second_catalog")
+curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -X PUT --data-binary "$second_catalog" \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/catalog" >/dev/null
+curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -d '{"reason":"Release-scoped transition acceptance"}' \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/approve" >/dev/null
+second_published=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X POST \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/publish")
+jq -e '.state == "PUBLISHED" and .signatureState == "SIGNED"' <<<"$second_published" >/dev/null
+second_descriptor=$(curl --silent --show-error --fail \
+  "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.1/descriptor")
+jq -e '.descriptor.version == "1.0.1" and .signature.algorithm == "Ed25519"' \
+  <<<"$second_descriptor" >/dev/null
+
+unlist_status=$(curl --silent --show-error -o "$tmp/unlist.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -X POST "$api_base/api/v1/dev-admin/releases/$release_id/unlist")
+[[ "$unlist_status" == 200 ]]
+plugin_after_unlist=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
+  "$api_base/api/v1/marketplace/plugins/com.example.dev-import?locale=en")
+latest_after_unlist=$(curl --silent --show-error --fail \
+  "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.1/manifest")
+unlisted_release_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
+  "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0")
+[[ "$plugin_after_unlist" == 200 && "$unlisted_release_status" == 404 ]]
+jq -e '.version == "1.0.1"' <<<"$latest_after_unlist" >/dev/null
+
+revoke_status=$(curl --silent --show-error -o "$tmp/revoke.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -H 'Content-Type: application/json' -d '{"category":"SECURITY","reason":"Isolated terminal-state acceptance"}' \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/revoke")
+[[ "$revoke_status" == 200 ]]
+revoked_publish_status=$(curl --silent --show-error -o "$tmp/revoked-publish.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X POST \
+  "$api_base/api/v1/dev-admin/releases/$second_release_id/publish")
+revoked_delete_status=$(curl --silent --show-error -o "$tmp/revoked-delete.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -X DELETE "$api_base/api/v1/dev-admin/releases/$second_release_id")
+[[ "$revoked_publish_status" == 409 && "$revoked_delete_status" == 409 ]]
+echo 'Release-scoped unlisting preserved the newer listing; revoked history rejected republish and deletion.'
+
 published_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head \
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest")
