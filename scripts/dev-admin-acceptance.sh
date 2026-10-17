@@ -520,14 +520,18 @@ empty_reference=$(jq -r .image <<<"$empty_result")
 empty_manifest=$(jq --arg id "$empty_plugin_id" --arg image "$empty_reference" \
   '.id=$id | .name="Empty plugin deletion acceptance" | .version="1.0.0" | .image=$image | .services=[]' \
   "$tmp/manifest.json")
-empty_catalog=$(jq '.slug="empty-plugin-delete-acceptance" | .title.en="Empty plugin deletion acceptance"' \
+empty_catalog=$(jq --arg id "$empty_plugin_id" \
+  '.pluginId=$id | .slug="empty-plugin-delete-acceptance" | .title.en="Empty plugin deletion acceptance"' \
   "$tmp/catalog-with-asset.json")
 jq -cn --argjson manifest "$empty_manifest" --argjson catalog "$empty_catalog" \
   '{manifest:$manifest,catalog:$catalog}' > "$tmp/empty-plugin-submission.json"
 empty_validation=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
   --data-binary "@$tmp/empty-plugin-submission.json" "$api_base/api/v1/dev-admin/releases/validate")
-jq -e '.valid == true and (.errors | length == 0)' <<<"$empty_validation" >/dev/null
+jq -e '.valid == true and (.errors | length == 0)' <<<"$empty_validation" >/dev/null || {
+  echo "Empty-plugin deletion draft validation failed: $empty_validation" >&2
+  exit 1
+}
 empty_draft=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
   -H "Idempotency-Key: dev-admin-empty-draft-$(openssl rand -hex 12)" \
