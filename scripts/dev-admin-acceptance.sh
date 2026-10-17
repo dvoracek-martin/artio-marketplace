@@ -601,7 +601,7 @@ echo 'Public sidecar OCI index resolves to platform-specific amd64 and arm64 man
 
 # A new never-approved draft may be removed; published history and its public
 # digest must remain protected from physical deletion.
-draft_manifest=$(jq '.version="1.0.1"' "$tmp/manifest.json")
+draft_manifest=$(jq '.version="1.0.2"' "$tmp/manifest.json")
 draft_catalog=$(jq '.title.en="Draft deletion acceptance"' \
   "$tmp/catalog-with-asset.json")
 jq -cn --argjson manifest "$draft_manifest" --argjson catalog "$draft_catalog" \
