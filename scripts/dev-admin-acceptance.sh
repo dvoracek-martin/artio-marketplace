@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-trap 'status=$?; echo "Dev admin acceptance failed at script line ${BASH_LINENO[0]} (exit $status)." >&2' ERR
+report_failure() {
+  local status=$?
+  printf 'Dev admin acceptance failed at script line %s (exit %s).\n' \
+    "${BASH_LINENO[0]:-unknown}" "$status" >&2
+  return "$status"
+}
+trap report_failure ERR
 
 api_base="${MARKETPLACE_DEV_API_BASE:-http://127.0.0.1:18080}"
 management="${MARKETPLACE_DEV_MANAGEMENT_URL:-http://127.0.0.1:18081/actuator/health/readiness}"
