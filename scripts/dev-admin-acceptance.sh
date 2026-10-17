@@ -625,7 +625,7 @@ draft_audit=$(docker compose --project-name "${MARKETPLACE_DEV_PROJECT:?}" \
   --env-file "${MARKETPLACE_DEV_ENV_FILE:?}" -f deployment/compose.yaml \
   -f deployment/compose.dev.yaml exec -T postgres psql -U artio_marketplace \
   -d artio_marketplace -Atqc "SELECT action || ':' || target FROM marketplace_audit WHERE action='DELETE_DRAFT' ORDER BY audit_id DESC LIMIT 1")
-grep -q 'DELETE_DRAFT:com.example.dev-import@1.0.1' <<<"$draft_audit"
+grep -q 'DELETE_DRAFT:com.example.dev-import@1.0.2' <<<"$draft_audit"
 published_delete_status=$(curl --silent --show-error -o "$tmp/delete-published.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
   -X DELETE "$api_base/api/v1/dev-admin/releases/$release_id")
