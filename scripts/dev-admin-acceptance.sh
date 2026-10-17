@@ -480,6 +480,13 @@ restored_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
 [[ "$restored_status" == 200 ]]
 echo 'Plugin suspension hides its public listing and the allowed restoration transition re-enables it.'
 
+# Check the published Core manifest while release 1.0.0 is still listed; the
+# later release-scoped unlisting check must make this public route return 404.
+curl --silent --show-error --fail \
+  "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
+  | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
+    '.image == $main and .services[0].id == "companion" and .services[0].image == $companion' >/dev/null
+
 # Publish a higher SemVer release with the same immutable OCI digests. This lets
 # acceptance verify release-scoped unlisting and terminal revocation behavior.
 second_manifest=$(jq '.version="1.0.1"' "$tmp/manifest.json")
@@ -591,10 +598,6 @@ arm64_image_id=$(docker image inspect --format '{{.Id}}' "$arm64_pull_ref")
 cleanup_image_ids+=("$arm64_image_id")
 [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$arm64_pull_ref")" == 'linux/arm64' ]]
 echo 'Public sidecar OCI index resolves to platform-specific amd64 and arm64 manifest digests; both child digests pull with their expected architectures.'
-curl --silent --show-error --fail \
-  "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
-  | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
-    '.image == $main and .services[0].id == "companion" and .services[0].image == $companion' >/dev/null
 
 # A new never-approved draft may be removed; published history and its public
 # digest must remain protected from physical deletion.
