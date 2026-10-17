@@ -71,6 +71,7 @@ test('drives archive selection, import and publication controls through the admi
   await page.getByRole('button', { name: 'Použít digest v runtime manifestu' }).click();
 
   const manifest = {
+    packageManifest: {
     manifestVersion: '1',
     id: 'com.example.browser',
     name: 'Browser acceptance plugin',
@@ -89,6 +90,9 @@ test('drives archive selection, import and publication controls through the admi
     geographicAvailability: { scope: 'GLOBAL', countries: [] },
     persistentPaths: [],
     services: [],
+    },
+    capabilities: ['payment.process'],
+    subscriptions: [],
   };
   const catalog = {
     schemaVersion: 1,
@@ -131,7 +135,7 @@ test('drives archive selection, import and publication controls through the admi
     `POST /api/v1/dev-admin/releases/${releaseId}/publish`,
   ]));
   const submittedManifest = JSON.parse(calls.find((call) => call.path === '/api/v1/dev-admin/releases' && call.method === 'POST')!.body);
-  expect(submittedManifest.manifest.image).toBe(digestReference);
+  expect(submittedManifest.manifest.packageManifest.image).toBe(digestReference);
   expect(browserErrors).toEqual([]);
 });
 
@@ -214,6 +218,9 @@ test('searches and filters catalog entries, then browses release states', async 
   await expect(analyticsPlugin).toHaveCount(0);
 
   await page.getByLabel('Moderace').selectOption('ALL');
+  // Clearing search schedules a 250 ms debounced request. Let it settle before
+  // changing pages so it cannot reset pagination during this assertion.
+  await page.waitForTimeout(300);
   await expect(page.locator('.pagination span')).toHaveText('Strana 1 / 2 · 52 pluginů');
   await page.getByRole('button', { name: 'Další' }).click();
   await expect(page.locator('.pagination span')).toHaveText('Strana 2 / 2 · 52 pluginů');

@@ -5,6 +5,22 @@ export function versionedApiPath(path: string): string {
   return path;
 }
 
+export function coreManifestIdentity(value: unknown): { id: string; version: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Runtime manifest must be a JSON object.');
+  }
+  const manifest = value as Record<string, unknown>;
+  const runtimeManifest = 'packageManifest' in manifest ? manifest.packageManifest : manifest;
+  if (!runtimeManifest || typeof runtimeManifest !== 'object' || Array.isArray(runtimeManifest)) {
+    throw new Error('Core v2 packageManifest must be a JSON object.');
+  }
+  const runtime = runtimeManifest as Record<string, unknown>;
+  if (typeof runtime.id !== 'string' || typeof runtime.version !== 'string') {
+    throw new Error('Core manifest must include its plugin id and version.');
+  }
+  return { id: runtime.id, version: runtime.version };
+}
+
 export function applyImportedDigestToManifest(
   manifestText: string,
   role: string,

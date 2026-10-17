@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyImportedDigestToManifest, versionedApiPath } from './api-contract';
+import { applyImportedDigestToManifest, coreManifestIdentity, versionedApiPath } from './api-contract';
 
 describe('local Marketplace development console API contract', () => {
   it('uses only the versioned development API namespace', () => {
@@ -8,6 +8,19 @@ describe('local Marketplace development console API contract', () => {
   });
   it('keeps browser-side release operations behind the dev-admin API', () => {
     expect(versionedApiPath('/api/v1/dev-admin/releases')).toBe('/api/v1/dev-admin/releases');
+  });
+
+  it('reads plugin identity from both Core manifest formats', () => {
+    expect(coreManifestIdentity({ id: 'example.v1', version: '1.0.0' })).toEqual({ id: 'example.v1', version: '1.0.0' });
+    expect(coreManifestIdentity({ packageManifest: { id: 'example.v2', version: '2.0.0' }, capabilities: [] }))
+      .toEqual({ id: 'example.v2', version: '2.0.0' });
+  });
+
+  it('rejects malformed Core manifest envelopes when preparing a release', () => {
+    expect(() => coreManifestIdentity(null)).toThrow('Runtime manifest must be a JSON object.');
+    expect(() => coreManifestIdentity({ packageManifest: [] })).toThrow('Core v2 packageManifest must be a JSON object.');
+    expect(() => coreManifestIdentity({ packageManifest: { id: 'example.v2' } }))
+      .toThrow('Core manifest must include its plugin id and version.');
   });
 
   it('applies the verified MAIN digest without changing other manifest fields', () => {
