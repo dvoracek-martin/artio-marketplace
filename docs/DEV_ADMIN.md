@@ -58,7 +58,7 @@ Quarantine is persistent to allow job inspection and manual recovery. A bounded 
 
 ## API routes
 
-The local browser adapter uses versioned `/api/v1/dev-admin/**` routes for session bootstrap, plugins/releases, listing revisions, release workflow actions and imports. These routes do not exist without the dev profile. Archive creation is `POST /api/v1/dev-admin/imports`; raw bytes are sent with `POST /api/v1/dev-admin/imports/{jobId}/archive`. Public Core routes remain under `/api/v1/marketplace/**`; publisher/admin APIs remain under `/api/v1/admin/marketplace/**`. See [OpenAPI](../marketplace-contract/openapi.yaml) for the existing public/publisher contracts and [ADR-0009](ADR-0009-local-dev-admin-and-oci-import.md) for the implementation boundary.
+The local browser adapter uses versioned `/api/v1/dev-admin/**` routes for session bootstrap, plugins/releases, listing revisions, release workflow actions and imports. These routes do not exist without the dev profile. Archive creation is `POST /api/v1/dev-admin/imports`; raw bytes are sent with `PUT /api/v1/dev-admin/imports/{jobId}/archive`. Public Core routes remain under `/api/v1/marketplace/**`; publisher/admin APIs remain under `/api/v1/admin/marketplace/**`. See [OpenAPI](../marketplace-contract/openapi.yaml) for the existing public/publisher contracts and [ADR-0009](ADR-0009-local-dev-admin-and-oci-import.md) for the implementation boundary.
 
 ## Current verification boundaries
 

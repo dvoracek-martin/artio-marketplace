@@ -63,7 +63,7 @@ upload_status=$(curl --silent --show-error -o "$tmp/upload.json" -w '%{http_code
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
   -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: fixture.tar' \
   -H 'X-Archive-Image: artio/dev-admin-archive-fixture:1.0.0' \
-  --data-binary "@$tmp/fixture.tar" "$api_base/api/v1/dev-admin/imports/$job_id/archive")
+  -X PUT --data-binary "@$tmp/fixture.tar" "$api_base/api/v1/dev-admin/imports/$job_id/archive")
 if [[ "$upload_status" != 202 ]]; then
   echo "Archive upload returned HTTP $upload_status: $(cat "$tmp/upload.json")" >&2
   exit 1
