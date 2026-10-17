@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('uploads an OCI archive and completes the signed publication flow through the admin UI', async ({ page }) => {
+test('drives archive selection, import and publication controls through the admin UI', async ({ page }) => {
   const calls: Array<{ method: string; path: string; body: string }> = [];
   let assetNumber = 0;
   const jobId = 'a61e9307-006f-4c61-a7aa-e2b7b405f74f';
