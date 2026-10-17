@@ -134,3 +134,57 @@ test('uploads an OCI archive and completes the signed publication flow through t
   expect(submittedManifest.manifest.image).toBe(digestReference);
   expect(browserErrors).toEqual([]);
 });
+
+test('searches and filters catalog entries, then browses release states', async ({ page }) => {
+  const pluginId = 'com.example.analytics';
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const method = route.request().method();
+    if (path === '/api/v1/dev-admin/session' && method === 'GET') {
+      await route.fulfill({ json: { apiVersion: 'v1', csrfToken: 'browser-test-csrf-token' } });
+    } else if (path === '/api/v1/dev-admin/plugins' && method === 'GET') {
+      await route.fulfill({ json: [
+        { pluginId, slug: 'analytics', vendor: 'Example', moderationState: 'ACTIVE', releaseCount: 2, newestPublished: '2.0.0', listingRevisionVersion: 1, categories: ['analytics'] },
+        { pluginId: 'com.example.security', slug: 'security', vendor: 'Example', moderationState: 'SUSPENDED', releaseCount: 1, newestPublished: '1.0.0', listingRevisionVersion: 1, categories: ['security'] },
+      ] });
+    } else if (path === '/api/v1/dev-admin/operations' && method === 'GET') {
+      await route.fulfill({ json: { api: 'UP', database: 'UP', zot: 'UP', environment: 'browser-test', apiBase: '/api/v1' } });
+    } else if (path === `/api/v1/dev-admin/plugins/${pluginId}/releases` && method === 'GET') {
+      await route.fulfill({ json: [
+        { releaseId: 'r2', version: '2.0.0', state: 'PUBLISHED', approvalState: 'APPROVED', manifestSha256: 'sha256:two', signed: true },
+        { releaseId: 'r1', version: '1.0.0', state: 'UNLISTED', approvalState: 'APPROVED', manifestSha256: 'sha256:one', signed: true },
+      ] });
+    } else if (path === `/api/v1/dev-admin/plugins/${pluginId}/effective-listing` && method === 'GET') {
+      await route.fulfill({ json: { metadata: { title: { en: 'Analytics' } }, version: 1 } });
+    } else if (path === `/api/v1/dev-admin/plugins/${pluginId}/revisions` && method === 'GET') {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ status: 404, json: { error: `Unexpected browser-test request ${method} ${path}` } });
+    }
+  });
+
+  await page.goto('/dev-admin/');
+  await expect(page.getByRole('heading', { name: 'Marketplace control room' })).toBeVisible();
+  const analyticsPlugin = page.getByRole('button', { name: /com\.example\.analytics/ });
+  const securityPlugin = page.getByRole('button', { name: /com\.example\.security/ });
+
+  await page.getByLabel('Hledat').fill(pluginId);
+  await expect(analyticsPlugin).toBeVisible();
+  await expect(securityPlugin).toHaveCount(0);
+  await page.getByLabel('Hledat').fill('');
+  await page.getByLabel('Kategorie').selectOption('security');
+  await expect(securityPlugin).toBeVisible();
+  await expect(analyticsPlugin).toHaveCount(0);
+  await page.getByLabel('Kategorie').selectOption('ALL');
+  await page.getByLabel('Moderace').selectOption('SUSPENDED');
+  await expect(securityPlugin).toBeVisible();
+  await expect(analyticsPlugin).toHaveCount(0);
+
+  await page.getByLabel('Moderace').selectOption('ALL');
+  await analyticsPlugin.click();
+  await expect(page.getByText('v2.0.0')).toBeVisible();
+  await expect(page.getByText('v1.0.0')).toBeVisible();
+  await page.locator('.release-filter select').first().selectOption('PUBLISHED');
+  await expect(page.getByText('v2.0.0')).toBeVisible();
+  await expect(page.getByText('v1.0.0')).toHaveCount(0);
+});
