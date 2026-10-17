@@ -2,6 +2,10 @@
 
 This status distinguishes successful checks from failures and checks that have not run. A green job does not override a failed check inside a `continue-on-error` step.
 
+## Current local verification (2026-10-17)
+
+On the current local `main` candidate, `./gradlew.bat --no-daemon --max-workers=1 --rerun-tasks spotlessCheck build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` passed (`BUILD SUCCESSFUL`, 41 tasks executed). This reran formatting, unit tests, architecture checks, JaCoCo reports and domain coverage without relying on cached test results. It does not run PostgreSQL/Zot integration tests or publish OCI images; the latest live Compose acceptance remains the separately recorded evidence below.
+
 ## Pre-hardening baseline
 
 Commit `7de67c23bd16f87687c1b6fc7ce530354fd534a7` was pushed to `main`. GitHub Actions run [38827486941](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38827486941) completed successfully. It verified Java 25.0.4, Gradle 9.8.1, formatting, unit/architecture tests, JaCoCo, OpenAPI lint, a live Compose/PostgreSQL/Zot stack, the Docker acceptance script, the backup/restore drill, SPDX SBOM generation, Trivy, and stack cleanup.
