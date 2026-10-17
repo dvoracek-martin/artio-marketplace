@@ -431,16 +431,27 @@ published_sidecar_status=$(curl --silent --show-error -D "$tmp/sidecar-public.he
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/$sidecar_digest")
 [[ "$published_sidecar_status" == 200 ]]
 grep -qi "Docker-Content-Digest: $sidecar_digest" "$tmp/sidecar-public.headers"
-sidecar_pull_ref="localhost:$registry_port/public/plugins/com.example.dev-import/1.0.0/sidecar-companion@$sidecar_digest"
-cleanup_image_ids+=("$sidecar_pull_ref")
-docker pull --platform linux/amd64 "$sidecar_pull_ref" >/dev/null
-amd64_image_id=$(docker image inspect --format '{{.Id}}' "$sidecar_pull_ref")
+sidecar_repository="localhost:$registry_port/public/plugins/com.example.dev-import/1.0.0/sidecar-companion"
+sidecar_public_index=$(curl --silent --show-error --fail \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+  "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/$sidecar_digest")
+amd64_digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | first' \
+  <<<"$sidecar_public_index")
+arm64_digest=$(jq -er '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] | first' \
+  <<<"$sidecar_public_index")
+[[ "$amd64_digest" =~ ^sha256:[a-f0-9]{64}$ && "$arm64_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+amd64_pull_ref="$sidecar_repository@$amd64_digest"
+arm64_pull_ref="$sidecar_repository@$arm64_digest"
+cleanup_image_ids+=("$amd64_pull_ref" "$arm64_pull_ref")
+docker pull --platform linux/amd64 "$amd64_pull_ref" >/dev/null
+amd64_image_id=$(docker image inspect --format '{{.Id}}' "$amd64_pull_ref")
 cleanup_image_ids+=("$amd64_image_id")
-[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$sidecar_pull_ref")" == 'linux/amd64' ]]
-docker pull --platform linux/arm64 "$sidecar_pull_ref" >/dev/null
-arm64_image_id=$(docker image inspect --format '{{.Id}}' "$sidecar_pull_ref")
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$amd64_pull_ref")" == 'linux/amd64' ]]
+docker pull --platform linux/arm64 "$arm64_pull_ref" >/dev/null
+arm64_image_id=$(docker image inspect --format '{{.Id}}' "$arm64_pull_ref")
 cleanup_image_ids+=("$arm64_image_id")
-[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$sidecar_pull_ref")" == 'linux/arm64' ]]
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$arm64_pull_ref")" == 'linux/arm64' ]]
+echo 'Public sidecar OCI index resolves to platform-specific amd64 and arm64 manifest digests; both child digests pull with their expected architectures.'
 curl --silent --show-error --fail \
   "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
   | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
