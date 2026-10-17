@@ -1,26 +1,50 @@
 services:
+  local-dev-secret-init:
+    image: artio-marketplace:dev-local
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        install -D -m 0400 -o 10001 -g 10001 /input/local_release_signing_key /secrets/local_release_signing_key
+        install -D -m 0400 -o 10001 -g 10001 /input/zot_importer_password /secrets/zot_importer_password
+    restart: "no"
+    network_mode: none
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN"]
+    mem_limit: 64m
+    cpus: 0.1
+    volumes:
+      - type: bind
+        source: ${MARKETPLACE_LOCAL_SIGNING_KEY_FILE:?Set MARKETPLACE_LOCAL_SIGNING_KEY_FILE to the persisted local release key}
+        target: /input/local_release_signing_key
+        read_only: true
+      - type: bind
+        source: ${MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE:?Set MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE to the staging-only importer password file}
+        target: /input/zot_importer_password
+        read_only: true
+      - local_dev_secrets:/secrets
+
   marketplace:
     image: artio-marketplace:dev-local
     build:
       target: dev
     environment:
       SPRING_PROFILES_ACTIVE: marketplace-local-dev
-      MARKETPLACE_LOCAL_SIGNING_KEY_FILE: /run/secrets/local_release_signing_key
-      MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE: /run/secrets/zot_importer_password
+      MARKETPLACE_LOCAL_SIGNING_KEY_FILE: /run/local-secrets/local_release_signing_key
+      MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE: /run/local-secrets/zot_importer_password
       MARKETPLACE_LOCAL_QUARANTINE_ROOT: /var/lib/artio-marketplace/quarantine
+    depends_on:
+      local-dev-secret-init:
+        condition: service_completed_successfully
     volumes:
       # Keep the Zot web UI and its required search extension opt-in for local
       # development; production uses the UI-disabled config baked into the image.
       - ./zot/config.dev.json:/etc/zot/config.json:ro
-      - type: bind
-        source: ${MARKETPLACE_LOCAL_SIGNING_KEY_FILE:?Set MARKETPLACE_LOCAL_SIGNING_KEY_FILE to the persisted local release key}
-        target: /run/secrets/local_release_signing_key
-        read_only: true
-      - type: bind
-        source: ${MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE:?Set MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE to the staging-only importer password file}
-        target: /run/secrets/zot_importer_password
-        read_only: true
+      - local_dev_secrets:/run/local-secrets:ro
       - marketplace_quarantine:/var/lib/artio-marketplace/quarantine
 
 volumes:
+  local_dev_secrets:
   marketplace_quarantine:

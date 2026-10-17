@@ -12,7 +12,7 @@ http://127.0.0.1:<Marketplace API port>/dev-admin/
 
 The exact port is in `.local-marketplace/connection.txt`. The Zot UI is separately available at `http://127.0.0.1:<public registry port>`; it browses registry content and does not administer Marketplace listings. Artio Core is not required to be running. The local Marketplace may serve many separate Core installations; it has no per-Core connection, Docker socket, or customer credentials.
 
-On macOS/Linux, provision the local-only secrets described in [deployment setup](DEPLOYMENT.md), then start with `deployment/compose.yaml` plus `deployment/compose.dev.yaml`. Set `MARKETPLACE_LOCAL_SIGNING_KEY_FILE` and `MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE` to private local files. The dev overlay binds them read-only and persists imports in its dedicated `marketplace_quarantine` volume. Do not mount these files in production.
+On macOS/Linux, provision the local-only secrets described in [deployment setup](DEPLOYMENT.md), then start with `deployment/compose.yaml` plus `deployment/compose.dev.yaml`. Set `MARKETPLACE_LOCAL_SIGNING_KEY_FILE` and `MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE` to private local files. An isolated one-shot Compose helper copies them from read-only host mounts into the private `local_dev_secrets` volume as UID 10001, mode `0400`; the Marketplace container mounts that volume read-only. Imports persist separately in `marketplace_quarantine`. Do not mount these files in production.
 
 ## Upload and publish the first plugin
 
