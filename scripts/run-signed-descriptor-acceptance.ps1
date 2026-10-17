@@ -17,6 +17,7 @@ $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
 $gitBash = 'C:\Program Files\Git\bin\bash.exe'
 $stackStarted = $false
 $marketplaceImageExisted = $false
+$marketplaceImageIdBefore = $null
 $htpasswdImageExisted = $false
 $testBaseImages = @(
   'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de',
@@ -73,6 +74,9 @@ New-Item -ItemType Directory -Path $taskTemp | Out-Null
 try {
   docker image inspect artio-marketplace:local *> $null
   $marketplaceImageExisted = ($LASTEXITCODE -eq 0)
+  if ($marketplaceImageExisted) {
+    $marketplaceImageIdBefore = (docker image inspect artio-marketplace:local --format '{{.Id}}').Trim()
+  }
   docker image inspect httpd:2.4-alpine *> $null
   $htpasswdImageExisted = ($LASTEXITCODE -eq 0)
   foreach ($image in $testBaseImages) {
@@ -197,7 +201,24 @@ try {
   if ($stackStarted) {
     docker compose --project-name $ProjectName --env-file $envFile -f (Join-Path $repo 'deployment/compose.yaml') down --volumes --remove-orphans
   }
-  if (-not $marketplaceImageExisted) { docker image rm artio-marketplace:local 2>$null | Out-Null }
+  if (-not $marketplaceImageExisted) {
+    docker image rm artio-marketplace:local 2>$null | Out-Null
+  } else {
+    docker image inspect artio-marketplace:local *> $null
+    if ($LASTEXITCODE -eq 0) {
+      $currentMarketplaceImageId = (docker image inspect artio-marketplace:local --format '{{.Id}}').Trim()
+      if ($currentMarketplaceImageId -ne $marketplaceImageIdBefore) {
+        docker image tag $marketplaceImageIdBefore artio-marketplace:local
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restore the pre-existing local Marketplace image tag.' }
+        $dependentContainers = @(docker ps -a --filter "ancestor=$currentMarketplaceImageId" --format '{{.Names}}')
+        if ($dependentContainers.Count -eq 0) {
+          docker image rm $currentMarketplaceImageId 2>$null | Out-Null
+        } else {
+          throw "Refusing to remove the acceptance image while containers still depend on it: $($dependentContainers -join ', ')"
+        }
+      }
+    }
+  }
   if (-not $htpasswdImageExisted) { docker image rm httpd:2.4-alpine 2>$null | Out-Null }
   foreach ($image in $testBaseImagesAbsentBefore) { docker image rm $image 2>$null | Out-Null }
   $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
