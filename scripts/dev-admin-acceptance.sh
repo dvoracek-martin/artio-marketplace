@@ -556,5 +556,19 @@ curl --silent --show-error --fail --head \
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest" >/dev/null
 echo 'Never-approved draft and empty-plugin deletion/audit passed; published release/plugin deletion was rejected and the public OCI digest remained available.'
+
+# Exercise the same publication path through a real Chromium session against
+# the live dev-only application, reusing the actual Docker-save archive above.
+live_plugin_id="com.example.live-browser-$(openssl rand -hex 5)"
+(
+  cd marketplace-admin-ui
+  MARKETPLACE_LIVE_BASE_URL="$api_base" \
+    MARKETPLACE_LIVE_PLUGIN_ID="$live_plugin_id" \
+    MARKETPLACE_LIVE_ARCHIVE_PATH="$(realpath "$tmp/fixture.tar")" \
+    MARKETPLACE_LIVE_ARCHIVE_TAG="$image" \
+    MARKETPLACE_LIVE_REGISTRY_BASE="http://127.0.0.1:$registry_port" \
+    npm run test:e2e:live
+)
+echo 'Live Chromium UI uploaded the real Docker-save archive, published and signed the release, fetched its official descriptor, and pulled its public OCI digest.'
 echo 'Local admin publication passed: staged OCI digest promoted publicly, release signed, descriptor and Core manifest available.'
 echo 'Local admin UI, CSRF boundary, Docker-save streaming import, multi-platform OCI sidecar upload and amd64/arm64 pulls, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'

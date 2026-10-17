@@ -5,7 +5,8 @@
   "scripts": {
     "build": "ng build",
     "test": "ng test --watch=false --isolate",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:live": "playwright test --config=playwright.live.config.ts"
   },
   "dependencies": {
     "@angular/common": "^22.2.3",
