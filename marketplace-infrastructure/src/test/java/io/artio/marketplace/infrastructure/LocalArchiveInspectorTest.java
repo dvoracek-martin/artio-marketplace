@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -72,6 +73,15 @@ class LocalArchiveInspectorTest {
     Path gzip = temp.resolve("compressed.tar.gz");
     Files.write(gzip, new byte[] {0x1f, (byte) 0x8b, 0, 0, 0, 0, 0, 0});
     assertThrows(IOException.class, () -> inspector.inspect(gzip));
+  }
+
+  @Test
+  void rejectsArchiveOverFourGiBBeforeReadingItsContents() throws Exception {
+    Path oversized = temp.resolve("oversized.tar");
+    try (RandomAccessFile sparse = new RandomAccessFile(oversized.toFile(), "rw")) {
+      sparse.setLength(4L * 1024 * 1024 * 1024 + 1);
+    }
+    assertThrows(IOException.class, () -> inspector.inspect(oversized));
   }
 
   @Test
