@@ -7,7 +7,9 @@ registry_port="${MARKETPLACE_DEV_REGISTRY_PORT:-15000}"
 importer_password_file="${MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE:-secrets/zot-importer-password.txt}"
 tmp=$(mktemp -d)
 image="artio/dev-admin-archive-fixture:accept-$(openssl rand -hex 8)"
-sidecar_image="artio/dev-admin-sidecar:multi-$(openssl rand -hex 8)"
+# OCI image-layout archives name references by tag only; unlike docker-save,
+# they do not carry the source repository name in ref.name.
+sidecar_image="multi-$(openssl rand -hex 8)"
 base_image='python:3.12-alpine'
 base_was_present=0
 declare -a cleanup_image_ids=()
@@ -104,6 +106,12 @@ docker buildx build --quiet --platform linux/amd64,linux/arm64 \
   --provenance=false \
   --build-arg ARTIO_REFERENCE_VERSION=1.0.0 \
   --output "type=oci,name=$sidecar_image,dest=$tmp/sidecar-oci.tar" examples/reference-plugin
+oci_archive_tags=$(tar -xOf "$tmp/sidecar-oci.tar" index.json \
+  | jq -r '.manifests[]?.annotations["org.opencontainers.image.ref.name"] // empty')
+grep -Fxq "$sidecar_image" <<<"$oci_archive_tags" || {
+  echo "Buildx OCI archive did not contain selected ref.name tag '$sidecar_image'; found: ${oci_archive_tags:-<none>}" >&2
+  exit 1
+}
 sidecar_payload=$(jq -cn --arg image "$sidecar_image" \
   '{pluginId:"com.example.dev-import",version:"1.0.0",role:"SIDECAR:companion",archiveTag:$image}')
 sidecar_job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
