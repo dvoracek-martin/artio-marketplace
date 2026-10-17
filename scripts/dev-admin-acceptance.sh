@@ -7,10 +7,13 @@ registry_port="${MARKETPLACE_DEV_REGISTRY_PORT:-15000}"
 importer_password_file="${MARKETPLACE_LOCAL_IMPORTER_PASSWORD_FILE:-secrets/zot-importer-password.txt}"
 tmp=$(mktemp -d)
 image="artio/dev-admin-archive-fixture:accept-$(openssl rand -hex 8)"
+sidecar_image="artio/dev-admin-sidecar:multi-$(openssl rand -hex 8)"
 base_image='python:3.12-alpine'
 base_was_present=0
+declare -a cleanup_image_ids=()
 docker image inspect "$base_image" >/dev/null 2>&1 && base_was_present=1
 cleanup() {
+  for image_id in "${cleanup_image_ids[@]}"; do docker image rm "$image_id" >/dev/null 2>&1 || true; done
   docker image rm "$image" >/dev/null 2>&1 || true
   if [[ "$base_was_present" == 0 ]]; then docker image rm "$base_image" >/dev/null 2>&1 || true; fi
   rm -rf -- "$tmp"
@@ -97,7 +100,11 @@ public_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head
 
 # A bundle role uses the Core PluginManifest v1 BundleService service ID. Keep
 # the main and sidecar artifacts separately digest-pinned through publication.
-sidecar_payload=$(jq -cn --arg image "$image" \
+docker buildx build --quiet --platform linux/amd64,linux/arm64 \
+  --provenance=false \
+  --build-arg ARTIO_REFERENCE_VERSION=1.0.0 \
+  --output "type=oci,name=$sidecar_image,dest=$tmp/sidecar-oci.tar" examples/reference-plugin
+sidecar_payload=$(jq -cn --arg image "$sidecar_image" \
   '{pluginId:"com.example.dev-import",version:"1.0.0",role:"SIDECAR:companion",archiveTag:$image}')
 sidecar_job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
@@ -107,8 +114,8 @@ sidecar_job_id=$(jq -r .jobId <<<"$sidecar_job")
 [[ "$sidecar_job_id" =~ ^[0-9a-f-]{36}$ ]]
 sidecar_upload_status=$(curl --silent --show-error -o "$tmp/sidecar-upload.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
-  -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: fixture.tar' \
-  -H "X-Archive-Image: $image" -X PUT --data-binary "@$tmp/fixture.tar" \
+  -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: sidecar-oci.tar' \
+  -H "X-Archive-Image: $sidecar_image" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
   "$api_base/api/v1/dev-admin/imports/$sidecar_job_id/archive")
 [[ "$sidecar_upload_status" == 202 ]] || {
   echo "Sidecar archive upload returned HTTP $sidecar_upload_status: $(cat "$tmp/sidecar-upload.json")" >&2
@@ -129,12 +136,14 @@ done
 sidecar_reference=$(jq -r .image <<<"$sidecar_result")
 [[ "$sidecar_reference" =~ @sha256:[a-f0-9]{64}$ ]]
 sidecar_digest=${sidecar_reference##*@}
+jq -e 'any(.platforms[]; .os == "linux" and .architecture == "amd64") and any(.platforms[]; .os == "linux" and .architecture == "arm64")' \
+  <<<"$sidecar_result" >/dev/null
 curl --silent --show-error --fail --head \
   -u "oci-importer:$password" \
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
   "http://127.0.0.1:$registry_port/v2/staging/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/import-${sidecar_job_id//-/}" \
   | grep -qi "Docker-Content-Digest: $sidecar_digest"
-echo 'Main and companion sidecar images were independently staged with verified digests.'
+echo 'Main docker-save and companion two-platform OCI sidecar images were independently staged with verified digests.'
 
 # Drive the same versioned browser adapter used by the local UI through release
 # validation, immutable draft creation, media upload, approval, promotion and
@@ -372,13 +381,28 @@ published_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --h
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest")
 [[ "$published_status" == 200 ]]
-published_sidecar_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head \
+curl --silent --show-error --fail --head \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+  "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest" \
+  | grep -qi "Docker-Content-Digest: $digest"
+published_sidecar_status=$(curl --silent --show-error -D "$tmp/sidecar-public.headers" -o /dev/null -w '%{http_code}' --head \
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/$sidecar_digest")
 [[ "$published_sidecar_status" == 200 ]]
+grep -qi "Docker-Content-Digest: $sidecar_digest" "$tmp/sidecar-public.headers"
+sidecar_pull_ref="localhost:$registry_port/public/plugins/com.example.dev-import/1.0.0/sidecar-companion@$sidecar_digest"
+cleanup_image_ids+=("$sidecar_pull_ref")
+docker pull --platform linux/amd64 "$sidecar_pull_ref" >/dev/null
+amd64_image_id=$(docker image inspect --format '{{.Id}}' "$sidecar_pull_ref")
+cleanup_image_ids+=("$amd64_image_id")
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$sidecar_pull_ref")" == 'linux/amd64' ]]
+docker pull --platform linux/arm64 "$sidecar_pull_ref" >/dev/null
+arm64_image_id=$(docker image inspect --format '{{.Id}}' "$sidecar_pull_ref")
+cleanup_image_ids+=("$arm64_image_id")
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$sidecar_pull_ref")" == 'linux/arm64' ]]
 curl --silent --show-error --fail \
   "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
   | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
     '.image == $main and .services[0].id == "companion" and .services[0].image == $companion' >/dev/null
 echo 'Local admin publication passed: staged OCI digest promoted publicly, release signed, descriptor and Core manifest available.'
-echo 'Local admin UI, CSRF boundary, runnable Docker-save streaming import, staging digest, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'
+echo 'Local admin UI, CSRF boundary, Docker-save streaming import, multi-platform OCI sidecar upload and amd64/arm64 pulls, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'
