@@ -581,6 +581,8 @@ public class LocalDevImportController {
       } catch (UnsupportedOperationException ignored) {
       }
       String prefix = "OCI_LAYOUT".equals(format) ? "oci-archive:" : "docker-archive:";
+      Path scratch = archive.getParent().resolve("skopeo-tmp");
+      Files.createDirectories(scratch);
       var command =
           new java.util.ArrayList<>(
               java.util.List.of(
@@ -592,7 +594,11 @@ public class LocalDevImportController {
                   "--dest-tls-verify=false",
                   prefix + archive + ":" + imageTag,
                   "docker://127.0.0.1:5000/" + repository + ":" + tag));
-      Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      var processBuilder =
+          new ProcessBuilder(withSkopeoTemporaryDirectory(command, scratch))
+              .redirectErrorStream(true);
+      configureSkopeoTemporaryDirectory(processBuilder, scratch);
+      Process process = processBuilder.start();
       var output = new java.io.ByteArrayOutputStream();
       Thread drain =
           new Thread(
@@ -623,6 +629,30 @@ public class LocalDevImportController {
             "Skopeo rejected archive: " + output.toString(java.nio.charset.StandardCharsets.UTF_8));
     } finally {
       Files.deleteIfExists(auth);
+      deleteSkopeoScratch(archive.getParent().resolve("skopeo-tmp"));
+    }
+  }
+
+  static void configureSkopeoTemporaryDirectory(ProcessBuilder process, Path scratch) {
+    String directory = scratch.toAbsolutePath().normalize().toString();
+    process.environment().put("TMPDIR", directory);
+    process.environment().put("TMP", directory);
+    process.environment().put("TEMP", directory);
+  }
+
+  static java.util.List<String> withSkopeoTemporaryDirectory(
+      java.util.List<String> command, Path scratch) {
+    var configured = new java.util.ArrayList<>(command);
+    configured.add(1, scratch.toAbsolutePath().normalize().toString());
+    configured.add(1, "--tmpdir");
+    return configured;
+  }
+
+  private static void deleteSkopeoScratch(Path scratch) throws IOException {
+    if (!Files.exists(scratch)) return;
+    try (var paths = Files.walk(scratch)) {
+      for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList())
+        Files.deleteIfExists(path);
     }
   }
 

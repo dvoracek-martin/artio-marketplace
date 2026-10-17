@@ -6,6 +6,8 @@ secrets/
 **/node_modules/
 **/.angular/
 marketplace-admin-ui/dist/
+marketplace-admin-ui/test-results/
+marketplace-admin-ui/playwright-report/
 .gradle/
 .gradle-cache/
 .idea/

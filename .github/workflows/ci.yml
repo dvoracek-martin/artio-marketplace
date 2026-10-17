@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: marketplace-admin-ui/package-lock.json
       - name: Test and build the development-only admin console
         working-directory: marketplace-admin-ui
-        run: npm ci --ignore-scripts && npm test && npm run build
+        run: npm ci --ignore-scripts && npx playwright install --with-deps chromium && npm test && npm run build && npm run test:e2e
       - name: Compile, format, unit and architecture checks, coverage
         run: ./gradlew --no-daemon spotlessCheck clean build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification
       - name: Lint OpenAPI 3.1 contract
