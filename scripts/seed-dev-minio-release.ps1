@@ -179,7 +179,8 @@ $digests = @{}
 $publisherToken = (Get-Content -Raw -LiteralPath (Join-Path $stateDirectory 'publisher-token.txt')).Trim()
 $registryPassword = (Get-Content -Raw -LiteralPath (Join-Path $stateDirectory 'zot-password.txt')).Trim()
 try {
-  $registryPassword | docker login $publisherRegistryHost --username publisher --password-stdin | Out-Null
+  $registryPasswordFile = Join-Path $stateDirectory 'zot-password.txt'
+  & $env:ComSpec /d /c "docker login $publisherRegistryHost --username publisher --password-stdin < `"$registryPasswordFile`""
   if ($LASTEXITCODE -ne 0) { throw 'Could not authenticate to the local publisher OCI endpoint.' }
   foreach ($image in $images) {
     $stagingRepository = "staging/plugins/$pluginId/$($image.Name)"
