@@ -56,8 +56,13 @@ test('publishes a real staged OCI image through the live development browser UI'
   // to 50 MiB, while the real streamed acceptance fixture is larger.
   await page.getByLabel('Docker save / OCI archive').setInputFiles(archivePath);
   await page.getByRole('button', { name: 'Nahrát a importovat' }).click();
-  await expect(page.locator('.progress progress')).toBeVisible({ timeout: 10_000 });
-  await expect(page.locator('.progress span')).toContainText('MiB', { timeout: 30_000 });
+  const uploadProgress = page.locator('.progress progress');
+  await expect(uploadProgress).toBeVisible({ timeout: 10_000 });
+  // Fast local/hosted runners can finish the upload before Playwright samples
+  // an intermediate byte-count event. Assert the browser's real upload
+  // progress reached its completed byte count instead of requiring a transient
+  // "MiB" status to remain visible after XHR completion.
+  await expect(uploadProgress).toHaveJSProperty('value', 100, { timeout: 30_000 });
   const publicReference = page.locator('.import-result code').last();
   await expect(publicReference).toContainText('@sha256:', { timeout: 240_000 });
   const imageReference = (await publicReference.textContent())?.trim() ?? '';
