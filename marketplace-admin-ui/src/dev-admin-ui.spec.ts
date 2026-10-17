@@ -40,6 +40,44 @@ describe('local Marketplace development console API contract', () => {
     ]);
   });
 
+  it('applies a MAIN digest inside a Core v2 package manifest and preserves its envelope', () => {
+    const source = JSON.stringify({
+      packageManifest: { manifestVersion: '2', id: 'example.plugin', image: 'old', services: [] },
+      capabilities: ['example.read'],
+      subscriptions: [{ event: 'example.changed' }],
+    });
+    const applied = JSON.parse(
+      applyImportedDigestToManifest(source, 'MAIN', 'registry.example/plugin@sha256:abc'),
+    );
+    expect(applied).toEqual({
+      packageManifest: {
+        manifestVersion: '2', id: 'example.plugin',
+        image: 'registry.example/plugin@sha256:abc', services: [],
+      },
+      capabilities: ['example.read'],
+      subscriptions: [{ event: 'example.changed' }],
+    });
+  });
+
+  it('applies a SIDECAR digest to a matching service inside a Core v2 package manifest', () => {
+    const source = JSON.stringify({
+      packageManifest: { manifestVersion: '2', image: 'main@sha256:main', services: [{ id: 'worker', image: 'old' }] },
+      capabilities: [],
+      subscriptions: [],
+    });
+    const applied = JSON.parse(
+      applyImportedDigestToManifest(source, 'SIDECAR:worker', 'registry.example/worker@sha256:abc'),
+    );
+    expect(applied.packageManifest.services[0].image).toBe('registry.example/worker@sha256:abc');
+    expect(applied.capabilities).toEqual([]);
+  });
+
+  it('rejects an invalid Core v2 packageManifest before applying an imported digest', () => {
+    expect(() => applyImportedDigestToManifest(
+      '{"packageManifest":[],"capabilities":[]}', 'MAIN', 'registry/image@sha256:abc',
+    )).toThrow('Core v2 packageManifest must be a JSON object.');
+  });
+
   it('refuses to invent a Core BundleService for a sidecar import', () => {
     expect(() =>
       applyImportedDigestToManifest('{"services":[]}', 'SIDECAR:worker', 'registry/image@sha256:abc'),

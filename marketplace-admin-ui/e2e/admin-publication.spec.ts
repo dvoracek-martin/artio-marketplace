@@ -162,7 +162,7 @@ test('searches and filters catalog entries, then browses release states', async 
       await route.fulfill({ json: {
         releaseId: 'r2', pluginId, version: '2.0.0', state: 'PUBLISHED', approvalState: 'APPROVED',
         rowVersion: 1, manifestSha256: 'sha256:manifest',
-        manifest: { image: 'localhost:15000/public/plugins/com.example.analytics/main@sha256:' + '1'.repeat(64), services: [{ id: 'worker', image: 'localhost:15000/public/plugins/com.example.analytics/worker@sha256:' + '2'.repeat(64) }] },
+        manifest: { packageManifest: { manifestVersion: '2', id: pluginId, version: '2.0.0', image: 'localhost:15000/public/plugins/com.example.analytics/main@sha256:' + '1'.repeat(64), services: [{ id: 'worker', image: 'localhost:15000/public/plugins/com.example.analytics/worker@sha256:' + '2'.repeat(64) }] }, capabilities: [], subscriptions: [] },
         catalog: { icon: 'sha256-' + '3'.repeat(64), screenshots: [{ assetId: 'sha256-' + '4'.repeat(64), order: 0, alt: { en: 'Analytics preview' }, caption: { en: 'Dashboard preview' } }] },
       } });
     } else if (path.startsWith('/api/v1/marketplace/assets/') && method === 'GET') {

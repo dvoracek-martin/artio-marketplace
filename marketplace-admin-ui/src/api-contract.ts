@@ -14,11 +14,19 @@ export function applyImportedDigestToManifest(
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     throw new Error('Runtime manifest must be a JSON object.');
   }
+  let runtimeManifest = manifest;
+  if ('packageManifest' in manifest) {
+    const packageManifest = manifest.packageManifest;
+    if (!packageManifest || typeof packageManifest !== 'object' || Array.isArray(packageManifest)) {
+      throw new Error('Core v2 packageManifest must be a JSON object.');
+    }
+    runtimeManifest = packageManifest as Record<string, unknown>;
+  }
   if (role === 'MAIN') {
-    manifest.image = publicReference;
+    runtimeManifest.image = publicReference;
   } else if (role.startsWith('SIDECAR:')) {
     const serviceId = role.slice('SIDECAR:'.length);
-    const services = manifest.services;
+    const services = runtimeManifest.services;
     const service = Array.isArray(services)
       ? services.find((item): item is Record<string, unknown> =>
           item !== null && typeof item === 'object' && !Array.isArray(item) && item.id === serviceId,
