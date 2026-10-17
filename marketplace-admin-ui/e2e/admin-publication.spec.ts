@@ -59,7 +59,7 @@ test('drives archive selection, import and publication controls through the admi
   await expect(page.getByRole('heading', { name: 'Marketplace control room' })).toBeVisible();
 
   await page.getByLabel('Plugin ID').fill('com.example.browser');
-  await page.getByLabel('Verze').fill('1.0.0');
+  await page.locator('.import-grid').getByLabel('Verze').fill('1.0.0');
   await page.getByLabel('Archive image tag').fill('fixture:1.0.0');
   await page.getByLabel('Docker save / OCI archive').setInputFiles({
     name: 'fixture.tar',
@@ -143,6 +143,7 @@ test('drives archive selection, import and publication controls through the admi
 
 test('searches and filters catalog entries, then browses release states', async ({ page }) => {
   const pluginId = 'com.example.analytics';
+  let lastPluginQuery: URLSearchParams | undefined;
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     const method = route.request().method();
@@ -155,6 +156,7 @@ test('searches and filters catalog entries, then browses release states', async 
         ...Array.from({ length: 50 }, (_, index) => ({ pluginId: `com.example.other-${index}`, slug: `other-${index}`, vendor: 'Fixture', moderationState: 'ACTIVE', releaseCount: 1, newestPublished: '1.0.0', listingRevisionVersion: 1, categories: ['other'] })),
       ];
       const query = new URL(route.request().url()).searchParams;
+      lastPluginQuery = query;
       const search = (query.get('q') ?? '').toLowerCase();
       const category = query.get('category') ?? 'ALL';
       const moderation = query.get('moderation') ?? 'ALL';
@@ -218,6 +220,18 @@ test('searches and filters catalog entries, then browses release states', async 
   await page.getByLabel('Moderace').selectOption('SUSPENDED');
   await expect(securityPlugin).toBeVisible();
   await expect(analyticsPlugin).toHaveCount(0);
+  await page.getByLabel('Formát manifestu').selectOption('2');
+  await page.getByLabel('Kompatibilní s Core').fill('2.4.0');
+  await page.getByLabel('Země').selectOption('CH');
+  await page.getByLabel('Release').selectOption('PUBLISHED');
+  await page.locator('.filters').getByLabel('Schválení').selectOption('APPROVED');
+  await page.locator('.filters').getByLabel('Podpis').selectOption('SIGNED');
+  await expect.poll(() => lastPluginQuery?.get('signed')).toBe('SIGNED');
+  expect(lastPluginQuery?.get('manifestVersion')).toBe('2');
+  expect(lastPluginQuery?.get('coreVersion')).toBe('2.4.0');
+  expect(lastPluginQuery?.get('country')).toBe('CH');
+  expect(lastPluginQuery?.get('releaseState')).toBe('PUBLISHED');
+  expect(lastPluginQuery?.get('approvalState')).toBe('APPROVED');
 
   await page.getByLabel('Moderace').selectOption('ALL');
   // Clearing search schedules a 250 ms debounced request. Let it settle before

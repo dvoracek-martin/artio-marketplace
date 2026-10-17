@@ -136,20 +136,79 @@ public class DevAdminController {
   }
 
   @GetMapping("/plugins/page")
-  public Map<String, Object> pluginPage(
+  public Map<String, Object> pluginPageEndpoint(
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "50") int size,
       @RequestParam(defaultValue = "") String q,
       @RequestParam(defaultValue = "ALL") String category,
-      @RequestParam(defaultValue = "ALL") String moderation) {
+      @RequestParam(defaultValue = "ALL") String moderation,
+      @RequestParam(defaultValue = "ALL") String manifestVersion,
+      @RequestParam(defaultValue = "") String coreVersion,
+      @RequestParam(defaultValue = "ALL") String country,
+      @RequestParam(defaultValue = "ALL") String releaseState,
+      @RequestParam(defaultValue = "ALL") String approvalState,
+      @RequestParam(defaultValue = "ALL") String signed) {
+    return pluginPage(
+        page,
+        size,
+        q,
+        category,
+        moderation,
+        manifestVersion,
+        coreVersion,
+        country,
+        releaseState,
+        approvalState,
+        signed);
+  }
+
+  Map<String, Object> pluginPage(int page, int size, String q, String category, String moderation) {
+    return pluginPage(page, size, q, category, moderation, "ALL", "", "ALL", "ALL", "ALL", "ALL");
+  }
+
+  Map<String, Object> pluginPage(
+      int page,
+      int size,
+      String q,
+      String category,
+      String moderation,
+      String manifestVersion,
+      String coreVersion,
+      String country,
+      String releaseState,
+      String approvalState,
+      String signed) {
     if (page < 0 || size < 1 || size > 100) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Invalid plugin page or page size.");
+    }
+    String normalizedCoreVersion = coreVersion == null ? "" : coreVersion.trim();
+    if (!normalizedCoreVersion.isEmpty()) {
+      try {
+        io.artio.marketplace.domain.SemanticVersion.parse(normalizedCoreVersion);
+      } catch (IllegalArgumentException invalid) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Core semantic version.");
+      }
     }
     String normalizedQuery = q == null ? "" : q.trim();
     String search = "%" + normalizedQuery + "%";
     String normalizedCategory = category == null ? "ALL" : category;
     String normalizedModeration = moderation == null ? "ALL" : moderation;
+    String normalizedManifestVersion = manifestVersion == null ? "ALL" : manifestVersion;
+    String normalizedCountry =
+        country == null ? "ALL" : country.trim().toUpperCase(java.util.Locale.ROOT);
+    String normalizedReleaseState = releaseState == null ? "ALL" : releaseState;
+    String normalizedApprovalState = approvalState == null ? "ALL" : approvalState;
+    String normalizedSigned = signed == null ? "ALL" : signed;
+    if (!java.util.Set.of("ALL", "1", "2").contains(normalizedManifestVersion)
+        || !java.util.Set.of(
+                "ALL", "DRAFT", "VALIDATED", "PUBLISHING", "PUBLISHED", "UNLISTED", "REVOKED")
+            .contains(normalizedReleaseState)
+        || !java.util.Set.of("ALL", "PENDING", "APPROVED").contains(normalizedApprovalState)
+        || !java.util.Set.of("ALL", "SIGNED", "UNSIGNED").contains(normalizedSigned)
+        || !normalizedCountry.matches("ALL|[A-Z]{2}")) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid plugin catalog filter.");
+    }
     String from =
         """
         FROM marketplace_plugins p
@@ -159,6 +218,23 @@ public class DevAdminController {
         WHERE (? = '' OR concat_ws(' ',p.plugin_id,p.slug,p.vendor,listing.metadata::text) ILIKE ?)
           AND (? = 'ALL' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(listing.metadata->'categories','[]'::jsonb)) category(value) WHERE category.value = ?))
           AND (? = 'ALL' OR p.moderation_state = ?)
+          AND (? = 'ALL' OR EXISTS (
+            SELECT 1 FROM marketplace_releases r
+            CROSS JOIN LATERAL (SELECT coalesce(r.manifest->'packageManifest',r.manifest) AS runtime_manifest) runtime
+            WHERE r.plugin_id=p.plugin_id
+              AND (? = 'ALL' OR coalesce(runtime.runtime_manifest->>'manifestVersion','1') = ?)
+              AND (? = '' OR (
+                marketplace_semver_compare(?,coalesce(runtime.runtime_manifest->>'minimumCoreVersion','0.0.0')) >= 0
+                AND (runtime.runtime_manifest->>'maximumCoreVersion' IS NULL OR marketplace_semver_compare(?,runtime.runtime_manifest->>'maximumCoreVersion') <= 0)
+              ))
+              AND (? = 'ALL' OR coalesce(runtime.runtime_manifest->'geographicAvailability'->>'scope','GLOBAL') = 'GLOBAL'
+                OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(runtime.runtime_manifest->'geographicAvailability'->'countries','[]'::jsonb)) allowed(value) WHERE allowed.value = ?))
+              AND (? = 'ALL' OR r.publication_state = ?)
+              AND (? = 'ALL' OR r.publication_approval_state = ?)
+              AND (? = 'ALL'
+                OR (? = 'SIGNED' AND EXISTS (SELECT 1 FROM release_signatures signature WHERE signature.release_id=r.release_id))
+                OR (? = 'UNSIGNED' AND NOT EXISTS (SELECT 1 FROM release_signatures signature WHERE signature.release_id=r.release_id)))
+          ))
         """;
     List<Object> parameters =
         List.of(
@@ -167,7 +243,22 @@ public class DevAdminController {
             normalizedCategory,
             normalizedCategory,
             normalizedModeration,
-            normalizedModeration);
+            normalizedModeration,
+            normalizedManifestVersion,
+            normalizedManifestVersion,
+            normalizedManifestVersion,
+            normalizedCoreVersion,
+            normalizedCoreVersion,
+            normalizedCoreVersion,
+            normalizedCountry,
+            normalizedCountry,
+            normalizedReleaseState,
+            normalizedReleaseState,
+            normalizedApprovalState,
+            normalizedApprovalState,
+            normalizedSigned,
+            normalizedSigned,
+            normalizedSigned);
     Long total = jdbc.queryForObject("SELECT count(*) " + from, Long.class, parameters.toArray());
     List<Map<String, Object>> content =
         jdbc.query(

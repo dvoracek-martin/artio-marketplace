@@ -768,8 +768,9 @@ import sys
 import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
+expected_name = 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured'
 tests = [case for case in root.iter('testcase')
-         if case.get('name') == 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured']
+         if case.get('name') in {expected_name, expected_name + '()'}]
 if len(tests) != 1 or any(case.find('skipped') is not None or case.find('failure') is not None or case.find('error') is not None
                           for case in tests):
     raise SystemExit('Core official Marketplace install acceptance did not pass exactly once (or was skipped).')

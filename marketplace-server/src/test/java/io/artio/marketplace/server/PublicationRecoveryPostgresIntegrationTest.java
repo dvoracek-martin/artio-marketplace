@@ -175,6 +175,65 @@ class PublicationRecoveryPostgresIntegrationTest {
   }
 
   @Test
+  void devAdminPluginPageFiltersActualManifestCompatibilityCountryAndReleaseSignature()
+      throws Exception {
+    String v2Manifest =
+        """
+        {"packageManifest":{"manifestVersion":"2","id":"recovery.test","name":"Recovery test v2","version":"2.0.0","vendor":"Artio","minimumCoreVersion":"2.0.0","maximumCoreVersion":"3.0.0","image":"localhost:5000/public/plugins/recovery@sha256:%s","extensionPoints":[],"configuration":{},"dependencies":[],"geographicAvailability":{"scope":"SELECTED","countries":["CH"]}},"capabilities":[],"subscriptions":[]}
+        """
+            .formatted("c".repeat(64));
+    jdbc.update(
+        "INSERT INTO marketplace_releases(release_id,plugin_id,version,manifest,manifest_document,manifest_sha256,metadata,publication_state,publication_approval_state,publication_approved_by,publication_approved_at,approved_manifest_sha256,approved_catalog_sha256,create_request_sha256) "
+            + "VALUES (?::uuid,?,?,?::jsonb,?,?,?::jsonb,'VALIDATED','APPROVED','admin',now(),?,?,?)",
+        "10000000-0000-0000-0000-000000000002",
+        PLUGIN_ID,
+        "2.0.0",
+        v2Manifest,
+        v2Manifest,
+        sha(v2Manifest),
+        CATALOG,
+        sha(v2Manifest),
+        sha(CATALOG),
+        sha(v2Manifest + "\n" + CATALOG));
+
+    var admin =
+        new DevAdminController(
+            jdbc,
+            null,
+            null,
+            null,
+            null,
+            new ObjectMapper(),
+            "http://127.0.0.1:5000",
+            "localhost:5000");
+
+    var compatibleSwissUnsigned =
+        admin.pluginPage(
+            0, 50, "", "ALL", "ALL", "2", "2.5.0", "CH", "VALIDATED", "APPROVED", "UNSIGNED");
+    assertThat(compatibleSwissUnsigned).containsEntry("totalElements", 1L);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> matching =
+        (List<Map<String, Object>>) compatibleSwissUnsigned.get("content");
+    assertThat(matching)
+        .singleElement()
+        .satisfies(plugin -> assertThat(plugin).containsEntry("pluginId", PLUGIN_ID));
+
+    assertThat(admin.pluginPage(0, 50, "", "ALL", "ALL", "2", "1.5.0", "CH", "ALL", "ALL", "ALL"))
+        .containsEntry("totalElements", 0L);
+    assertThat(admin.pluginPage(0, 50, "", "ALL", "ALL", "2", "2.5.0", "DE", "ALL", "ALL", "ALL"))
+        .containsEntry("totalElements", 0L);
+    assertThat(
+            admin.pluginPage(0, 50, "", "ALL", "ALL", "2", "2.5.0", "CH", "ALL", "ALL", "SIGNED"))
+        .containsEntry("totalElements", 0L);
+    assertThatThrownBy(
+            () ->
+                admin.pluginPage(
+                    0, 50, "", "ALL", "ALL", "ALL", "not-semver", "ALL", "ALL", "ALL", "ALL"))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("Invalid Core semantic version");
+  }
+
+  @Test
   void partialCopyFailureLeavesRetryableJobAndRetryPublishesTheSameApprovedRelease() {
     doAnswer(
             invocation -> {
