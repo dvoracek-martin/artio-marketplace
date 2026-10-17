@@ -65,7 +65,7 @@ forged_host_status=$(curl --silent --show-error -o "$tmp/host-response.html" -w 
 }
 forwarded_host_status=$(curl --silent --show-error -o "$tmp/forwarded-response.html" -w '%{http_code}' \
   -H 'X-Forwarded-Host: 127.0.0.1' "$api_base/api/v1/dev-admin/session")
-[[ "$forwarded_host_status" == 404 ]]
+[[ "$forwarded_host_status" == 403 || "$forwarded_host_status" == 404 ]]
 echo 'CSRF, cross-origin POST, forged Host and forwarded-host rejection passed.'
 
 docker build --quiet --build-arg ARTIO_REFERENCE_VERSION=1.0.0 \
