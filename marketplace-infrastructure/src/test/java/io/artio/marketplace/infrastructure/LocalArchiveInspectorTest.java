@@ -120,6 +120,58 @@ class LocalArchiveInspectorTest {
   }
 
   @Test
+  void acceptsBuildxOciArchiveWithNestedIndexAndInheritedArchiveTag() throws Exception {
+    byte[] configAmd64 = "{\"os\":\"linux\",\"architecture\":\"amd64\"}".getBytes();
+    byte[] configArm64 = "{\"os\":\"linux\",\"architecture\":\"arm64\"}".getBytes();
+    byte[] layerAmd64 = "amd64-layer".getBytes();
+    byte[] layerArm64 = "arm64-layer".getBytes();
+    byte[] manifestAmd64 = ociManifest(configAmd64, layerAmd64);
+    byte[] manifestArm64 = ociManifest(configArm64, layerArm64);
+    ObjectNode nestedIndex = mapper.createObjectNode().put("schemaVersion", 2);
+    nestedIndex.set(
+        "manifests",
+        mapper
+            .createArrayNode()
+            .add(indexDescriptor(manifestAmd64, "amd64"))
+            .add(indexDescriptor(manifestArm64, "arm64")));
+    byte[] nestedIndexBytes = mapper.writeValueAsBytes(nestedIndex);
+    ObjectNode rootDescriptor =
+        mapper
+            .createObjectNode()
+            .put("mediaType", "application/vnd.oci.image.index.v1+json")
+            .put("digest", "sha256:" + sha256(nestedIndexBytes))
+            .put("size", nestedIndexBytes.length);
+    rootDescriptor.set(
+        "annotations",
+        mapper
+            .createObjectNode()
+            .put("org.opencontainers.image.ref.name", "multi-platform-fixture"));
+    ObjectNode root = mapper.createObjectNode().put("schemaVersion", 2);
+    root.set("manifests", mapper.createArrayNode().add(rootDescriptor));
+
+    Path archive =
+        tar(
+            entry("oci-layout", "{\"imageLayoutVersion\":\"1.0.0\"}"),
+            entry("index.json", mapper.writeValueAsBytes(root)),
+            blob(nestedIndexBytes),
+            blob(manifestAmd64),
+            blob(manifestArm64),
+            blob(configAmd64),
+            blob(configArm64),
+            blob(layerAmd64),
+            blob(layerArm64));
+
+    var inventory = inspector.inspect(archive);
+    assertEquals("OCI_LAYOUT", inventory.format());
+    assertEquals(
+        List.of("multi-platform-fixture", "multi-platform-fixture"),
+        inventory.images().stream().map(LocalArchiveInspector.Image::archiveTag).toList());
+    assertEquals(
+        List.of("amd64", "arm64"),
+        inventory.images().stream().map(LocalArchiveInspector.Image::architecture).toList());
+  }
+
+  @Test
   void rejectsDuplicatePathsAndTamperedContentAddressedBlobs() throws Exception {
     Path duplicate =
         tar(

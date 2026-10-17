@@ -86,7 +86,7 @@ public final class LocalArchiveInspector {
     }
     if (metadata.containsKey("manifest.json")) return inspectDocker(archive, metadata, names);
     if (metadata.containsKey("index.json") && metadata.containsKey("oci-layout"))
-      return inspectOci(metadata, names);
+      return inspectOci(archive, metadata, names);
     throw new IOException(
         "Archive is neither a Docker save archive nor a valid OCI layout archive");
   }
@@ -143,7 +143,8 @@ public final class LocalArchiveInspector {
     throw new IOException("Docker save config metadata is missing");
   }
 
-  private Inventory inspectOci(Map<String, byte[]> metadata, Set<String> names) throws IOException {
+  private Inventory inspectOci(Path archive, Map<String, byte[]> metadata, Set<String> names)
+      throws IOException {
     JsonNode layout = mapper.readTree(metadata.get("oci-layout"));
     JsonNode root = mapper.readTree(metadata.get("index.json"));
     if (!"1.0.0".equals(layout.path("imageLayoutVersion").asText())
@@ -152,21 +153,85 @@ public final class LocalArchiveInspector {
         || root.path("manifests").isEmpty())
       throw new IOException("OCI layout/index metadata is invalid");
     List<Image> images = new ArrayList<>();
+    Set<String> visitedIndexes = new HashSet<>();
     for (JsonNode descriptor : root.path("manifests")) {
-      String digest = descriptor.path("digest").asText();
-      String blob = "blobs/sha256/" + digest.replace("sha256:", "");
-      if (!digest.matches("sha256:[a-f0-9]{64}") || !names.contains(blob))
-        throw new IOException("OCI index references a missing manifest blob");
-      JsonNode annotations = descriptor.path("annotations");
-      String tag = annotations.path("org.opencontainers.image.ref.name").asText();
+      String tag =
+          descriptor.path("annotations").path("org.opencontainers.image.ref.name").asText();
       if (tag.isBlank()) tag = "imported-" + images.size();
-      images.add(
-          new Image(
-              tag,
-              descriptor.path("platform").path("os").asText("unknown"),
-              descriptor.path("platform").path("architecture").asText("unknown")));
+      appendOciDescriptor(archive, descriptor, tag, names, visitedIndexes, images, 0);
     }
     return new Inventory("OCI_LAYOUT", images, names.size());
+  }
+
+  private void appendOciDescriptor(
+      Path archive,
+      JsonNode descriptor,
+      String inheritedTag,
+      Set<String> names,
+      Set<String> visitedIndexes,
+      List<Image> images,
+      int depth)
+      throws IOException {
+    if (depth > 8) throw new IOException("OCI index nesting is too deep");
+    String digest = descriptor.path("digest").asText();
+    if (!digest.matches("sha256:[a-f0-9]{64}"))
+      throw new IOException("OCI index references an invalid manifest digest");
+    String blob = "blobs/sha256/" + digest.substring("sha256:".length());
+    if (!names.contains(blob))
+      throw new IOException("OCI index references a missing manifest blob");
+    JsonNode annotations = descriptor.path("annotations");
+    String tag = annotations.path("org.opencontainers.image.ref.name").asText(inheritedTag);
+    if (tag.isBlank()) tag = inheritedTag;
+    if (!tag.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}") || tag.contains(".."))
+      throw new IOException("OCI archive contains an unsafe repository tag");
+
+    JsonNode document = mapper.readTree(readBlob(archive, blob));
+    JsonNode children = document.path("manifests");
+    if (children.isArray()) {
+      if (document.path("schemaVersion").asInt() != 2 || children.isEmpty())
+        throw new IOException("Nested OCI index is invalid or contains no manifests");
+      if (!visitedIndexes.add(digest))
+        throw new IOException("OCI index contains a reference cycle");
+      for (JsonNode child : children)
+        appendOciDescriptor(archive, child, tag, names, visitedIndexes, images, depth + 1);
+      visitedIndexes.remove(digest);
+      return;
+    }
+
+    JsonNode config = document.path("config");
+    JsonNode layers = document.path("layers");
+    if (document.path("schemaVersion").asInt() != 2
+        || !validOciBlob(config, names)
+        || !layers.isArray()) throw new IOException("OCI image manifest is malformed");
+    for (JsonNode layer : layers)
+      if (!validOciBlob(layer, names))
+        throw new IOException("OCI image manifest has a missing layer");
+
+    JsonNode platform = descriptor.path("platform");
+    images.add(
+        new Image(
+            tag,
+            platform.path("os").asText("unknown"),
+            platform.path("architecture").asText("unknown")));
+  }
+
+  private byte[] readBlob(Path archive, String blobName) throws IOException {
+    try (TarArchiveInputStream tar = new TarArchiveInputStream(Files.newInputStream(archive))) {
+      TarArchiveEntry entry;
+      while ((entry = tar.getNextEntry()) != null) {
+        if (!blobName.equals(entry.getName())) continue;
+        if (!entry.isFile() || entry.getSize() < 0 || entry.getSize() > MAX_METADATA)
+          throw new IOException("OCI index metadata blob is invalid or too large");
+        return readBounded(tar, (int) entry.getSize());
+      }
+    }
+    throw new IOException("OCI index references a missing manifest blob");
+  }
+
+  private boolean validOciBlob(JsonNode descriptor, Set<String> names) {
+    String digest = descriptor.path("digest").asText();
+    return digest.matches("sha256:[a-f0-9]{64}")
+        && names.contains("blobs/sha256/" + digest.substring("sha256:".length()));
   }
 
   private static void validateName(String name) throws IOException {

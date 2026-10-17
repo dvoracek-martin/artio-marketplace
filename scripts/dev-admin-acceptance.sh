@@ -106,13 +106,14 @@ docker buildx build --quiet --platform linux/amd64,linux/arm64 \
   --provenance=false \
   --build-arg ARTIO_REFERENCE_VERSION=1.0.0 \
   --output "type=oci,name=$sidecar_image,dest=$tmp/sidecar-oci.tar" examples/reference-plugin
-oci_archive_tags=$(tar -xOf "$tmp/sidecar-oci.tar" index.json \
+mapfile -t oci_archive_tags < <(tar -xOf "$tmp/sidecar-oci.tar" index.json \
   | jq -r '.manifests[]?.annotations["org.opencontainers.image.ref.name"] // empty')
-grep -Fxq "$sidecar_image" <<<"$oci_archive_tags" || {
-  echo "Buildx OCI archive did not contain selected ref.name tag '$sidecar_image'; found: ${oci_archive_tags:-<none>}" >&2
+if ((${#oci_archive_tags[@]} != 1)); then
+  echo "Expected one named OCI image in the sidecar archive; found: ${oci_archive_tags[*]:-<none>}" >&2
   exit 1
-}
-sidecar_payload=$(jq -cn --arg image "$sidecar_image" \
+fi
+sidecar_archive_tag=${oci_archive_tags[0]}
+sidecar_payload=$(jq -cn --arg image "$sidecar_archive_tag" \
   '{pluginId:"com.example.dev-import",version:"1.0.0",role:"SIDECAR:companion",archiveTag:$image}')
 sidecar_job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
@@ -123,7 +124,7 @@ sidecar_job_id=$(jq -r .jobId <<<"$sidecar_job")
 sidecar_upload_status=$(curl --silent --show-error -o "$tmp/sidecar-upload.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
   -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: sidecar-oci.tar' \
-  -H "X-Archive-Image: $sidecar_image" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
+  -H "X-Archive-Image: $sidecar_archive_tag" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
   "$api_base/api/v1/dev-admin/imports/$sidecar_job_id/archive")
 [[ "$sidecar_upload_status" == 202 ]] || {
   echo "Sidecar archive upload returned HTTP $sidecar_upload_status: $(cat "$tmp/sidecar-upload.json")" >&2
@@ -449,7 +450,7 @@ plugin_delete_status=$(curl --silent --show-error -o "$tmp/delete-plugin.json" -
   -X DELETE "$api_base/api/v1/dev-admin/plugins/com.example.dev-import")
 [[ "$plugin_delete_status" == 409 ]]
 empty_plugin_id='com.example.empty-delete'
-empty_import_payload=$(jq -cn --arg id "$empty_plugin_id" --arg image "$sidecar_image" \
+empty_import_payload=$(jq -cn --arg id "$empty_plugin_id" --arg image "$sidecar_archive_tag" \
   '{pluginId:$id,version:"1.0.0",role:"MAIN",archiveTag:$image}')
 empty_import=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
@@ -460,7 +461,7 @@ empty_job_id=$(jq -r .jobId <<<"$empty_import")
 empty_upload_status=$(curl --silent --show-error -o "$tmp/empty-upload.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
   -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: empty-plugin-oci.tar' \
-  -H "X-Archive-Image: $sidecar_image" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
+  -H "X-Archive-Image: $sidecar_archive_tag" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
   "$api_base/api/v1/dev-admin/imports/$empty_job_id/archive")
 [[ "$empty_upload_status" == 202 ]]
 empty_state=''
