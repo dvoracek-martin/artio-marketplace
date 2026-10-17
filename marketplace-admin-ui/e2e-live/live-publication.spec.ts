@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const pluginId = process.env.MARKETPLACE_LIVE_PLUGIN_ID;
+const version = process.env.MARKETPLACE_LIVE_VERSION ?? '1.0.0';
 const archivePath = process.env.MARKETPLACE_LIVE_ARCHIVE_PATH;
 const archiveTag = process.env.MARKETPLACE_LIVE_ARCHIVE_TAG;
 const registryBase = process.env.MARKETPLACE_LIVE_REGISTRY_BASE;
@@ -23,29 +24,33 @@ test('publishes a real staged OCI image through the live development browser UI'
   await page.getByRole('button', { name: '+ Nový release' }).click();
 
   const manifest = {
-    manifestVersion: '1',
-    id: pluginId,
-    name: 'Live browser publication acceptance',
-    vendor: 'Artio Marketplace',
-    version: '1.0.0',
-    description: 'Publishes a real imported archive through the development console.',
-    minimumCoreVersion: '0.1.0',
-    maximumCoreVersion: '99.0.0',
-    image: 'localhost:15000/staging/pending@sha256:' + '0'.repeat(64),
-    dependencies: [],
-    permissions: ['payment.process'],
-    configuration: {},
-    extensionPoints: ['payment.provider.v1'],
-    healthPath: '/health',
-    diagnosticsPath: '/diagnostics',
-    geographicAvailability: { scope: 'GLOBAL', countries: [] },
-    persistentPaths: [],
-    services: [],
+    packageManifest: {
+      manifestVersion: '2',
+      id: pluginId,
+      name: 'Live browser publication acceptance',
+      vendor: 'Artio Marketplace',
+      version,
+      description: 'Publishes a real imported archive through the development console.',
+      minimumCoreVersion: '0.1.0',
+      maximumCoreVersion: '99.0.0',
+      image: 'localhost:15000/staging/pending@sha256:' + '0'.repeat(64),
+      dependencies: [],
+      permissions: [],
+      configuration: {},
+      extensionPoints: [],
+      healthPath: '/health',
+      diagnosticsPath: '/diagnostics',
+      geographicAvailability: { scope: 'GLOBAL', countries: [] },
+      persistentPaths: [],
+      services: [],
+    },
+    capabilities: [{ capabilityId: 'payment.provider.v1', operations: ['createCheckout'], permissions: ['payment.process'], accountFingerprints: {} }],
+    subscriptions: [{ eventType: 'order.paid', schemaVersion: 1, permissions: [] }],
   };
   await page.getByLabel('Runtime manifest JSON').fill(JSON.stringify(manifest, null, 2));
 
   await page.getByLabel('Plugin ID').fill(pluginId);
-  await page.getByLabel('Verze').fill('1.0.0');
+  await page.getByLabel('Verze').fill(version);
   await page.getByLabel('Archive image tag').fill(archiveTag);
   // Pass the large archive by path: Playwright limits in-memory FilePayloads
   // to 50 MiB, while the real streamed acceptance fixture is larger.
@@ -93,10 +98,10 @@ test('publishes a real staged OCI image through the live development browser UI'
   await expect(page.getByText('Manifest a OCI artifact jsou validní')).toBeVisible({ timeout: 60_000 });
   page.on('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Uložit, schválit a publikovat' }).click();
-  await expect(page.getByText(`Publikováno a podepsáno: ${pluginId}@1.0.0`)).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByText(`Publikováno a podepsáno: ${pluginId}@${version}`)).toBeVisible({ timeout: 120_000 });
 
   const descriptorResponse = await request.get(
-    new URL(`/api/v1/marketplace/plugins/${encodeURIComponent(pluginId)}/releases/1.0.0/descriptor`, baseURL).toString(),
+    new URL(`/api/v1/marketplace/plugins/${encodeURIComponent(pluginId)}/releases/${version}/descriptor`, baseURL).toString(),
   );
   expect(descriptorResponse.status()).toBe(200);
   const envelope = await descriptorResponse.json();
@@ -104,12 +109,12 @@ test('publishes a real staged OCI image through the live development browser UI'
   expect(envelope.signature.keyId).toBeTruthy();
   expect(envelope.signature.value).toBeTruthy();
   expect(envelope.descriptor.pluginId).toBe(pluginId);
-  expect(envelope.descriptor.manifest.image).toBe(imageReference);
+  expect(envelope.descriptor.manifest.packageManifest.image).toBe(imageReference);
   const coreManifestResponse = await request.get(
-    new URL(`/api/v1/marketplace/plugins/${encodeURIComponent(pluginId)}/releases/1.0.0/manifest`, baseURL).toString(),
+    new URL(`/api/v1/marketplace/plugins/${encodeURIComponent(pluginId)}/releases/${version}/manifest`, baseURL).toString(),
   );
   expect(coreManifestResponse.status()).toBe(200);
-  expect((await coreManifestResponse.json()).image).toBe(imageReference);
+  expect((await coreManifestResponse.json()).packageManifest.image).toBe(imageReference);
   await expect(page.getByRole('button', { name: new RegExp(pluginId.replaceAll('.', '\\.')) })).toBeVisible();
 
   const registryPath = imageReference.replace(/^localhost:\d+/, '');

@@ -147,6 +147,7 @@ jobs:
         env:
           MARKETPLACE_DEV_PROJECT: marketplace-dev-admin-${{ github.run_id }}
           MARKETPLACE_DEV_ENV_FILE: .env.dev
+          ARTIO_CORE_PATH: ${{ github.workspace }}/artio-core
         run: |
           cp .env .env.dev
           sed -i -e 's/^MARKETPLACE_API_PORT=.*/MARKETPLACE_API_PORT=18080/' \

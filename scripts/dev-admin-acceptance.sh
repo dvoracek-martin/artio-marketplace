@@ -21,9 +21,11 @@ sidecar_image="multi-$(openssl rand -hex 8)"
 base_image='python:3.12-alpine'
 base_was_present=0
 declare -a cleanup_image_ids=()
+declare -a cleanup_extra_images=()
 docker image inspect "$base_image" >/dev/null 2>&1 && base_was_present=1
 cleanup() {
   for image_id in "${cleanup_image_ids[@]}"; do docker image rm "$image_id" >/dev/null 2>&1 || true; done
+  for extra_image in "${cleanup_extra_images[@]}"; do docker image rm "$extra_image" >/dev/null 2>&1 || true; done
   docker image rm "$image" >/dev/null 2>&1 || true
   if [[ "$base_was_present" == 0 ]]; then docker image rm "$base_image" >/dev/null 2>&1 || true; fi
   rm -rf -- "$tmp"
@@ -706,18 +708,78 @@ curl --silent --show-error --fail --head \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest" >/dev/null
 echo 'Never-approved draft and empty-plugin deletion/audit passed; published release/plugin deletion was rejected and the public OCI digest remained available.'
 
-# Exercise the same publication path through a real Chromium session against
-# the live dev-only application, reusing the actual Docker-save archive above.
-live_plugin_id="com.example.live-browser-$(openssl rand -hex 5)"
-(
-  cd marketplace-admin-ui
-  MARKETPLACE_LIVE_BASE_URL="$api_base" \
-    MARKETPLACE_LIVE_PLUGIN_ID="$live_plugin_id" \
-    MARKETPLACE_LIVE_ARCHIVE_PATH="$(realpath "$tmp/fixture.tar")" \
-    MARKETPLACE_LIVE_ARCHIVE_TAG="$image" \
-    MARKETPLACE_LIVE_REGISTRY_BASE="http://127.0.0.1:$registry_port" \
-    npm run test:e2e:live
-)
-echo 'Live Chromium UI uploaded the real Docker-save archive, published and signed the release, fetched its official descriptor, and pulled its public OCI digest.'
+# Exercise publication through the real Chromium UI against the live dev-only
+# application. When the pinned Core checkout is available, publish the exact
+# two v2 releases consumed by its official Marketplace install/update/rollback
+# acceptance. No Core source is edited by this script.
+if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
+  live_plugin_id='marketplace.reference'
+  core_v2_tag="artio/core-marketplace-v2:accept-$(openssl rand -hex 8)"
+  core_v3_tag="artio/core-marketplace-v3:accept-$(openssl rand -hex 8)"
+  cleanup_extra_images+=("$core_v2_tag" "$core_v3_tag")
+  docker build --quiet --build-arg ARTIO_REFERENCE_VERSION=2 --tag "$core_v2_tag" examples/reference-plugin >/dev/null
+  docker build --quiet --build-arg ARTIO_REFERENCE_VERSION=3 --tag "$core_v3_tag" examples/reference-plugin >/dev/null
+  docker save --output "$tmp/core-v2.tar" "$core_v2_tag"
+  docker save --output "$tmp/core-v3.tar" "$core_v3_tag"
+  (
+    cd marketplace-admin-ui
+    for spec in '1.3.0|core-v2.tar|'"$core_v2_tag" '1.4.0|core-v3.tar|'"$core_v3_tag"; do
+      IFS='|' read -r version archive archive_tag <<<"$spec"
+      MARKETPLACE_LIVE_BASE_URL="$api_base" \
+        MARKETPLACE_LIVE_PLUGIN_ID="$live_plugin_id" \
+        MARKETPLACE_LIVE_VERSION="$version" \
+        MARKETPLACE_LIVE_ARCHIVE_PATH="$(realpath "$tmp/$archive")" \
+        MARKETPLACE_LIVE_ARCHIVE_TAG="$archive_tag" \
+        MARKETPLACE_LIVE_REGISTRY_BASE="http://127.0.0.1:$registry_port" \
+        npm run test:e2e:live
+    done
+  )
+  core_v2_reference=$(curl --silent --show-error --fail \
+    "$api_base/api/v1/marketplace/plugins/$live_plugin_id/releases/1.3.0/manifest" | jq -er '.packageManifest.image')
+  core_v3_reference=$(curl --silent --show-error --fail \
+    "$api_base/api/v1/marketplace/plugins/$live_plugin_id/releases/1.4.0/manifest" | jq -er '.packageManifest.image')
+  [[ "$core_v2_reference" == *@sha256:* && "$core_v3_reference" == *@sha256:* ]]
+  [[ -n ${MARKETPLACE_SIGNING_PRIVATE_KEY_FILE:-} && -f ${MARKETPLACE_SIGNING_PRIVATE_KEY_FILE:-} ]]
+  [[ -n ${MARKETPLACE_SIGNING_KEY_ID:-} ]]
+  signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER \
+    | base64 -w0 | tr '+/' '-_' | tr -d '=')
+  core_path=$(cd "$ARTIO_CORE_PATH" && pwd)
+  export ARTIO_MARKETPLACE_BASE_URL="$api_base"
+  export ARTIO_MARKETPLACE_TEST_PLUGIN_ID="$live_plugin_id"
+  export ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION=1.3.0
+  export ARTIO_MARKETPLACE_UPDATE_PLUGIN_VERSION=1.4.0
+  export ARTIO_MARKETPLACE_TRUSTED_KEYS="$MARKETPLACE_SIGNING_KEY_ID=$signing_public_key"
+  export ARTIO_EXTENSION_TRUSTED_REGISTRIES="localhost:$registry_port"
+  export ARTIO_TEST_EXTENSION_IMAGE_V2="$core_v2_reference"
+  export ARTIO_TEST_EXTENSION_IMAGE_V3="$core_v3_reference"
+  (cd "$core_path" && bash ./gradlew --no-daemon --max-workers=1 :artio-rest-api:integrationTest --rerun \
+    --tests io.artio.api.catalog.CatalogApiIntegrationTests.importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured)
+  core_report="$core_path/artio-rest-api/build/test-results/integrationTest/TEST-io.artio.api.catalog.CatalogApiIntegrationTests.xml"
+  python3 - "$core_report" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+tests = [case for case in root.iter('testcase')
+         if case.get('name') == 'importsPublishedMarketplaceManifestThroughCoreApiWhenAcceptanceIsConfigured']
+if len(tests) != 1 or any(case.find('skipped') is not None or case.find('failure') is not None or case.find('error') is not None
+                          for case in tests):
+    raise SystemExit('Core official Marketplace install acceptance did not pass exactly once (or was skipped).')
+print('Core official Marketplace install/update/rollback acceptance passed with the exact two GUI-published signed manifests.')
+PY
+else
+  live_plugin_id="com.example.live-browser-$(openssl rand -hex 5)"
+  (
+    cd marketplace-admin-ui
+    MARKETPLACE_LIVE_BASE_URL="$api_base" \
+      MARKETPLACE_LIVE_PLUGIN_ID="$live_plugin_id" \
+      MARKETPLACE_LIVE_ARCHIVE_PATH="$(realpath "$tmp/fixture.tar")" \
+      MARKETPLACE_LIVE_ARCHIVE_TAG="$image" \
+      MARKETPLACE_LIVE_REGISTRY_BASE="http://127.0.0.1:$registry_port" \
+      npm run test:e2e:live
+  )
+  echo 'Core install acceptance NOT RUN: ARTIO_CORE_PATH was not supplied; the live signed publication browser acceptance did pass.'
+fi
+echo 'Live Chromium UI uploaded real Docker-save archives and published signed releases with official descriptors and public OCI digests.'
 echo 'Local admin publication passed: staged OCI digest promoted publicly, release signed, descriptor and Core manifest available.'
 echo 'Local admin UI, CSRF boundary, Docker-save streaming import, multi-platform OCI sidecar upload and amd64/arm64 pulls, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'
