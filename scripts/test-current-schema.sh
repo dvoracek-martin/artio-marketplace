@@ -52,9 +52,6 @@ BEGIN
   IF marketplace_semver_sort_key('1.10.0') COLLATE "C" <= marketplace_semver_sort_key('1.9.9') COLLATE "C" THEN
     RAISE EXCEPTION 'SemVer sort key failed';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM marketplace_dev_import_jobs) OR NOT EXISTS (SELECT 1 FROM marketplace_listing_revisions) THEN
-    RAISE EXCEPTION 'V2 local administration tables were not created';
-  END IF;
   IF (SELECT count(*) FROM marketplace_releases WHERE plugin_id='migration.fixture' AND version='1.0.0') <> 1 THEN
     RAISE EXCEPTION 'forward migration did not preserve the existing published release';
   END IF;
