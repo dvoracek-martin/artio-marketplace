@@ -177,7 +177,7 @@ cat > "$tmp/manifest.json" <<JSON
   "diagnosticsPath":"/diagnostics",
   "geographicAvailability":{"scope":"GLOBAL","countries":[]},
   "persistentPaths":[],
-  "services":[{"id":"companion","image":"$sidecar_reference","port":8080,"healthPath":"/health","configurationBindings":{},"dependsOn":[],"persistentPaths":[],"internalPorts":[],"memoryLimitMb":64}]
+  "services":[{"id":"companion","image":"$sidecar_reference","port":8080,"healthPath":"/health","configurationBindings":{},"dependsOn":[],"persistentPaths":[],"internalPorts":[],"memoryLimitMb":128}]
 }
 JSON
 placeholder="sha256-$(printf '0%.0s' {1..64})"
