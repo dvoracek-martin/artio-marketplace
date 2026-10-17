@@ -2,12 +2,20 @@
 set -euo pipefail
 
 report_failure() {
-  local status=$?
-  printf 'Dev admin acceptance failed at script line %s (exit %s).\n' \
-    "${BASH_LINENO[0]:-unknown}" "$status" >&2
+  local status="$1"
+  local line="$2"
+  local command="${3:-unknown command}"
+  printf 'Dev admin acceptance failed at script line %s (exit %s): %s\n' \
+    "$line" "$status" "$command" >&2
+  if [[ -n ${GITHUB_ACTIONS:-} ]]; then
+    local annotation_command
+    annotation_command=$(printf '%s' "$command" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' -e 's/\n/%0A/g' -e 's/::/%3A%3A/g')
+    printf '::error file=scripts/dev-admin-acceptance.sh,line=%s,title=Dev admin acceptance failed::%s\n' \
+      "$line" "$annotation_command" >&2
+  fi
   return "$status"
 }
-trap report_failure ERR
+trap 'report_failure "$?" "${BASH_LINENO[0]:-unknown}" "$BASH_COMMAND"' ERR
 
 api_base="${MARKETPLACE_DEV_API_BASE:-http://127.0.0.1:18080}"
 management="${MARKETPLACE_DEV_MANAGEMENT_URL:-http://127.0.0.1:18081/actuator/health/readiness}"
