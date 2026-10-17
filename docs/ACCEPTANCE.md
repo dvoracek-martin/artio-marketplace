@@ -6,6 +6,8 @@ This status distinguishes successful checks from failures and checks that have n
 
 On the current local `main` candidate, `./gradlew.bat --no-daemon --max-workers=1 --rerun-tasks spotlessCheck build jacocoTestReport :marketplace-domain:jacocoTestCoverageVerification` passed (`BUILD SUCCESSFUL`, 41 tasks executed). This reran formatting, unit tests, architecture checks, JaCoCo reports and domain coverage without relying on cached test results. It does not run PostgreSQL/Zot integration tests or publish OCI images; the latest live Compose acceptance remains the separately recorded evidence below.
 
+The already-running local development stack also answered readiness `UP` on port 18081. Its public CH catalog returned `storage.artio-minio` 1.1.2 and its descriptor endpoint returned a signed descriptor with five image references from the local Zot registry on port 15000. This is local development publication only; it is not public registry or independent Marketplace release approval. The check was read-only and did not recreate or alter the stack.
+
 ## Pre-hardening baseline
 
 Commit `7de67c23bd16f87687c1b6fc7ce530354fd534a7` was pushed to `main`. GitHub Actions run [38827486941](https://github.com/dvoracek-martin/artio-marketplace/actions/runs/38827486941) completed successfully. It verified Java 25.0.4, Gradle 9.8.1, formatting, unit/architecture tests, JaCoCo, OpenAPI lint, a live Compose/PostgreSQL/Zot stack, the Docker acceptance script, the backup/restore drill, SPDX SBOM generation, Trivy, and stack cleanup.
