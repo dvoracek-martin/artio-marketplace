@@ -290,9 +290,18 @@ approval_status=$(curl --silent --show-error -o "$tmp/approval.json" -w '%{http_
   echo "Plugin state: $plugin_before_approval" >&2
   exit 1
 }
-published=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+publish_status=$(curl --silent --show-error -o "$tmp/publish.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X POST \
   "$api_base/api/v1/dev-admin/releases/$release_id/publish")
+[[ "$publish_status" == 200 ]] || {
+  release_after_publish=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+    "$api_base/api/v1/dev-admin/releases/$release_id")
+  echo "Local dev release publication returned HTTP $publish_status: $(cat "$tmp/publish.json")" >&2
+  echo "Release after attempted publication: $release_after_publish" >&2
+  exit 1
+}
+published=$(cat "$tmp/publish.json")
 jq -e '.state == "PUBLISHED" and .signatureState == "SIGNED"' <<<"$published" >/dev/null || {
   echo "Dev release was not published and signed: $published" >&2
   exit 1
