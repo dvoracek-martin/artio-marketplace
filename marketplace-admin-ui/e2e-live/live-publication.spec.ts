@@ -1,6 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
 
 const pluginId = process.env.MARKETPLACE_LIVE_PLUGIN_ID;
 const archivePath = process.env.MARKETPLACE_LIVE_ARCHIVE_PATH;
@@ -49,11 +47,9 @@ test('publishes a real staged OCI image through the live development browser UI'
   await page.getByLabel('Plugin ID').fill(pluginId);
   await page.getByLabel('Verze').fill('1.0.0');
   await page.getByLabel('Archive image tag').fill(archiveTag);
-  await page.getByLabel('Docker save / OCI archive').setInputFiles({
-    name: basename(archivePath),
-    mimeType: 'application/x-tar',
-    buffer: await readFile(archivePath),
-  });
+  // Pass the large archive by path: Playwright limits in-memory FilePayloads
+  // to 50 MiB, while the real streamed acceptance fixture is larger.
+  await page.getByLabel('Docker save / OCI archive').setInputFiles(archivePath);
   await page.getByRole('button', { name: 'Nahrát a importovat' }).click();
   await expect(page.locator('.progress progress')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('.progress span')).toContainText('MiB', { timeout: 30_000 });
