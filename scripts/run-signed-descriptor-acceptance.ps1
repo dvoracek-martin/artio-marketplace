@@ -73,16 +73,15 @@ if ($existingProjectResources.Count -gt 0) { throw "Refusing to reuse Docker res
 New-Item -ItemType Directory -Path $taskTemp | Out-Null
 
 try {
-  docker image inspect artio-marketplace:local *> $null
-  $marketplaceImageExisted = ($LASTEXITCODE -eq 0)
+  $existingTags = @(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}')
+  $marketplaceImageExisted = ($existingTags -contains 'artio-marketplace:local')
   if ($marketplaceImageExisted) {
     $marketplaceImageIdBefore = (docker image inspect artio-marketplace:local --format '{{.Id}}').Trim()
   }
-  docker image inspect httpd:2.4-alpine *> $null
-  $htpasswdImageExisted = ($LASTEXITCODE -eq 0)
+  $htpasswdImageExisted = ($existingTags -contains 'httpd:2.4-alpine')
+  $existingDigests = @(docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}')
   foreach ($image in $testBaseImages) {
-    docker image inspect $image *> $null
-    if ($LASTEXITCODE -ne 0) { $testBaseImagesAbsentBefore.Add($image) }
+    if ($existingDigests -notcontains $image) { $testBaseImagesAbsentBefore.Add($image) }
   }
 
   $publisher = New-Token
@@ -220,10 +219,15 @@ try {
       }
     }
   }
-  if (-not $htpasswdImageExisted) { docker image rm httpd:2.4-alpine 2>$null | Out-Null }
+  if (-not $htpasswdImageExisted) {
+    $localTags = @(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}')
+    if ($localTags -contains 'httpd:2.4-alpine') { docker image rm httpd:2.4-alpine *> $null }
+  }
+  $localDigests = @(docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}')
   foreach ($image in $testBaseImagesAbsentBefore) {
-    $imageId = docker image inspect $image --format '{{.Id}}' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $imageId) { docker image rm --force $imageId.Trim() 2>$null | Out-Null }
+    # Remove only the exact digest reference pulled by this run. Removing by image ID
+    # also removes every tag for that image, including aliases that predated the run.
+    if ($localDigests -contains $image) { docker image rm $image *> $null }
   }
   $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
   $target = [IO.Path]::GetFullPath($taskTemp)
