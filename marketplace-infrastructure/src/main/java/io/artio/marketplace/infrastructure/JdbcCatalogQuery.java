@@ -174,7 +174,7 @@ public class JdbcCatalogQuery implements CatalogQuery {
     SemanticVersion.parse(version);
     var rows =
         jdbc.query(
-            "SELECT r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text,r.published_at,p.slug,p.vendor"
+            "SELECT r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text AS metadata,r.published_at,p.slug,p.vendor"
                 + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
                 + " LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'"
                 + " WHERE r.plugin_id=? AND r.version=? AND "
@@ -200,7 +200,7 @@ public class JdbcCatalogQuery implements CatalogQuery {
     validate("en", coreVersion, country);
     var rows =
         jdbc.query(
-            "SELECT r.version,r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text,r.published_at,p.slug,p.vendor"
+            "SELECT r.version,r.manifest_document AS manifest,COALESCE(lr.metadata || jsonb_build_object('releaseNotes',r.metadata->'releaseNotes'),r.metadata)::text AS metadata,r.published_at,p.slug,p.vendor"
                 + " FROM marketplace_releases r JOIN marketplace_plugins p ON p.plugin_id=r.plugin_id"
                 + " LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'"
                 + " WHERE r.plugin_id=? AND "

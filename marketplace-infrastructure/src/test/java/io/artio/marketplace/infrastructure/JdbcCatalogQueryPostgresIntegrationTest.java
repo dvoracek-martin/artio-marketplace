@@ -141,6 +141,17 @@ class JdbcCatalogQueryPostgresIntegrationTest {
         "test",
         catalogCard.get("releaseNotes"),
         "release notes must remain the immutable original release snapshot");
+
+    @SuppressWarnings("unchecked")
+    var releaseMetadata =
+        (java.util.Map<String, Object>)
+            catalog.release("com.ex.revision", "1.0.0", null, null, false, "en").get("metadata");
+    assertEquals("Rebranded plugin", releaseMetadata.get("title"));
+    @SuppressWarnings("unchecked")
+    var latestMetadata =
+        (java.util.Map<String, Object>)
+            catalog.latestCompatible("com.ex.revision", "2.0.0", null, false).get("metadata");
+    assertEquals("Rebranded plugin", latestMetadata.get("title"));
   }
 
   private String cardVersion(
