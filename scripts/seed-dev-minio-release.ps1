@@ -8,7 +8,7 @@ $stateDirectory = Join-Path $marketplaceRoot '.local-marketplace'
 $packageDirectory = Join-Path $stateDirectory 'minio-dev-package'
 $releaseEvidencePath = Join-Path $stateDirectory 'minio-dev-release.json'
 $pluginRoot = Join-Path (Resolve-Path $CorePath).Path 'artio-plugins\minio-object-storage'
-$version = '1.1.0'
+$version = '1.1.2'
 $pluginId = 'storage.artio-minio'
 
 function Read-LocalSetting([string]$Name) {
