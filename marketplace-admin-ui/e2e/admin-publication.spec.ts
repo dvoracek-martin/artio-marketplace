@@ -72,7 +72,7 @@ test('drives archive selection, import and publication controls through the admi
 
   const manifest = {
     packageManifest: {
-    manifestVersion: '1',
+    manifestVersion: '2',
     id: 'com.example.browser',
     name: 'Browser acceptance plugin',
     vendor: 'Artio Marketplace',
@@ -122,10 +122,12 @@ test('drives archive selection, import and publication controls through the admi
   await page.getByLabel('Akce').selectOption('PUBLISH_NOW');
   await page.getByRole('button', { name: 'Validovat' }).click();
   await expect(page.getByText('Manifest a OCI artifact jsou validní')).toBeVisible();
-  page.on('dialog', (dialog) => dialog.accept());
+  const confirmations: string[] = [];
+  page.on('dialog', (dialog) => { confirmations.push(dialog.message()); void dialog.accept(); });
   await page.getByRole('button', { name: 'Uložit, schválit a publikovat' }).click();
 
   await expect(page.getByText(/Publikováno a podepsáno: com\.example\.browser@1\.0\.0/)).toBeVisible();
+  expect(confirmations).toContain('Publikovat com.example.browser@1.0.0 do veřejného katalogu?');
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual(expect.arrayContaining([
     'POST /api/v1/dev-admin/imports',
     `PUT /api/v1/dev-admin/imports/${jobId}/archive`,
