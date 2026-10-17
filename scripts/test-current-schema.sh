@@ -18,11 +18,18 @@ trap cleanup EXIT
 
 docker run --detach --name "$container" --tmpfs /var/lib/postgresql/data:rw,size=256m \
   --env POSTGRES_PASSWORD=schema-test-only "$image" >/dev/null
+database_ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; then break; fi
+  if docker exec "$container" psql -U postgres -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; then
+    database_ready=1
+    break
+  fi
   sleep 1
 done
-docker exec "$container" pg_isready -U postgres >/dev/null
+if [[ "$database_ready" != 1 ]]; then
+  echo 'Disposable PostgreSQL did not become queryable within 60 seconds.' >&2
+  exit 1
+fi
 docker exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < marketplace-infrastructure/src/main/resources/db/migration/V1__marketplace.sql
 
