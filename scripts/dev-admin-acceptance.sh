@@ -22,26 +22,31 @@ for _ in $(seq 1 120); do
   sleep 2
 done
 curl --silent --fail "$management" | jq -e '.status == "UP"' >/dev/null
+echo 'Dev Marketplace readiness passed.'
 
 ui=$(curl --silent --show-error --fail "$api_base/dev-admin/")
 grep -q '<ama-root>' <<<"$ui"
+echo 'Development console route passed.'
 mkdir -p "$tmp/cookies"
 session=$(curl --silent --show-error --fail -c "$tmp/cookies/session.txt" "$api_base/api/v1/dev-admin/session")
 jq -e 'keys == ["apiVersion","csrfToken"] and (.csrfToken|length > 20)' <<<"$session" >/dev/null
 csrf=$(jq -r .csrfToken <<<"$session")
+echo 'Session bootstrap passed.'
 
 # A same-origin POST without the session CSRF token must be rejected.
 csrf_status=$(curl --silent --show-error -o "$tmp/csrf-response.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H 'Content-Type: application/json' \
   -X POST -d '{}' "$api_base/api/v1/dev-admin/imports")
 [[ "$csrf_status" == 403 ]]
+echo 'CSRF rejection passed.'
 
 cat > "$tmp/Dockerfile" <<'EOF'
 FROM python:3.12-alpine
 CMD ["python3", "-c", "print('Artio archive-import acceptance fixture')"]
 EOF
-docker build --quiet --tag "$image" "$tmp"
+docker build --quiet --tag "$image" "$tmp" >/dev/null
 docker save --output "$tmp/fixture.tar" "$image"
+echo "Docker-save fixture created ($(stat -c '%s' "$tmp/fixture.tar") bytes)."
 
 job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
@@ -49,13 +54,21 @@ job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -d '{"pluginId":"com.example.dev-import","version":"1.0.0","role":"MAIN","archiveTag":"artio/dev-admin-archive-fixture:1.0.0"}' \
   "$api_base/api/v1/dev-admin/imports")
 job_id=$(jq -r .jobId <<<"$job")
-[[ "$job_id" =~ ^[0-9a-f-]{36}$ ]]
+if [[ ! "$job_id" =~ ^[0-9a-f-]{36}$ ]]; then
+  echo "Could not create import job: ${job:-no response}" >&2
+  exit 1
+fi
+echo 'Import job creation passed.'
 upload_status=$(curl --silent --show-error -o "$tmp/upload.json" -w '%{http_code}' \
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
   -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: fixture.tar' \
   -H 'X-Archive-Image: artio/dev-admin-archive-fixture:1.0.0' \
   --data-binary "@$tmp/fixture.tar" "$api_base/api/v1/dev-admin/imports/$job_id/archive")
-[[ "$upload_status" == 202 ]]
+if [[ "$upload_status" != 202 ]]; then
+  echo "Archive upload returned HTTP $upload_status: $(cat "$tmp/upload.json")" >&2
+  exit 1
+fi
+echo 'Streaming archive upload returned HTTP 202.'
 
 state=''
 for _ in $(seq 1 300); do
