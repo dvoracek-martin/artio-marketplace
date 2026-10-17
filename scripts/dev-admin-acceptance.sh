@@ -375,7 +375,7 @@ stale_status=$(curl --silent --show-error -o "$tmp/stale-revision.json" -w '%{ht
 [[ "$stale_status" == 409 ]]
 current=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   "$api_base/api/v1/dev-admin/plugins/com.example.dev-import/effective-listing")
-current_version=$(jq -r .version <<<"$current")
+current_version=$(jq -r .listingRevisionVersion <<<"$current")
 rollback_payload=$(jq -cn --argjson metadata "$(jq -c .metadata <<<"$current")" \
   --argjson expected "$current_version" --arg source "$baseline_id" \
   '{metadata:$metadata,expectedListingVersion:$expected,rollbackSourceRevisionId:$source}')
