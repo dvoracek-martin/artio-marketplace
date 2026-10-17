@@ -95,6 +95,47 @@ public_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest")
 [[ "$public_status" != 200 ]]
 
+# A bundle role uses the Core PluginManifest v1 BundleService service ID. Keep
+# the main and sidecar artifacts separately digest-pinned through publication.
+sidecar_payload=$(jq -cn --arg image "$image" \
+  '{pluginId:"com.example.dev-import",version:"1.0.0",role:"SIDECAR:companion",archiveTag:$image}')
+sidecar_job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-sidecar-$(openssl rand -hex 12)" \
+  --data-binary "$sidecar_payload" "$api_base/api/v1/dev-admin/imports")
+sidecar_job_id=$(jq -r .jobId <<<"$sidecar_job")
+[[ "$sidecar_job_id" =~ ^[0-9a-f-]{36}$ ]]
+sidecar_upload_status=$(curl --silent --show-error -o "$tmp/sidecar-upload.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: fixture.tar' \
+  -H "X-Archive-Image: $image" -X PUT --data-binary "@$tmp/fixture.tar" \
+  "$api_base/api/v1/dev-admin/imports/$sidecar_job_id/archive")
+[[ "$sidecar_upload_status" == 202 ]] || {
+  echo "Sidecar archive upload returned HTTP $sidecar_upload_status: $(cat "$tmp/sidecar-upload.json")" >&2
+  exit 1
+}
+sidecar_state=''
+for _ in $(seq 1 300); do
+  sidecar_result=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+    "$api_base/api/v1/dev-admin/imports/$sidecar_job_id")
+  sidecar_state=$(jq -r .state <<<"$sidecar_result")
+  [[ "$sidecar_state" == STAGED || "$sidecar_state" == FAILED ]] && break
+  sleep 2
+done
+[[ "$sidecar_state" == STAGED ]] || {
+  echo "OCI sidecar archive import did not stage successfully: ${sidecar_result:-no response}" >&2
+  exit 1
+}
+sidecar_reference=$(jq -r .image <<<"$sidecar_result")
+[[ "$sidecar_reference" =~ @sha256:[a-f0-9]{64}$ ]]
+sidecar_digest=${sidecar_reference##*@}
+curl --silent --show-error --fail --head \
+  -u "oci-importer:$password" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+  "http://127.0.0.1:$registry_port/v2/staging/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/import-${sidecar_job_id//-/}" \
+  | grep -qi "Docker-Content-Digest: $sidecar_digest"
+echo 'Main and companion sidecar images were independently staged with verified digests.'
+
 # Drive the same versioned browser adapter used by the local UI through release
 # validation, immutable draft creation, media upload, approval, promotion and
 # persisted Ed25519 signing. The fixture image is intentionally only a registry
@@ -117,8 +158,8 @@ cat > "$tmp/manifest.json" <<JSON
   "healthPath":"/health",
   "diagnosticsPath":"/diagnostics",
   "geographicAvailability":{"scope":"GLOBAL","countries":[]},
-  "services":[],
-  "persistentPaths":[]
+  "persistentPaths":[],
+  "services":[{"id":"companion","image":"$sidecar_reference","port":8080,"healthPath":"/health","configurationBindings":{},"dependsOn":[],"persistentPaths":[],"internalPorts":[],"memoryLimitMb":64}]
 }
 JSON
 placeholder="sha256-$(printf '0%.0s' {1..64})"
@@ -331,8 +372,13 @@ published_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --h
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
   "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest")
 [[ "$published_status" == 200 ]]
+published_sidecar_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+  "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/sidecar-companion/manifests/$sidecar_digest")
+[[ "$published_sidecar_status" == 200 ]]
 curl --silent --show-error --fail \
   "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
-  | jq -e '.image | endswith("@'"$digest"'")' >/dev/null
+  | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
+    '.image == $main and .services[0].id == "companion" and .services[0].image == $companion' >/dev/null
 echo 'Local admin publication passed: staged OCI digest promoted publicly, release signed, descriptor and Core manifest available.'
 echo 'Local admin UI, CSRF boundary, runnable Docker-save streaming import, staging digest, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'
