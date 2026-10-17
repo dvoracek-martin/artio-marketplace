@@ -164,6 +164,8 @@ jobs:
         run: bash ./scripts/backup-restore-drill.sh
       - name: Capture diagnostics on failure
         if: failure()
+        env:
+          MARKETPLACE_DEV_PROJECT: marketplace-dev-admin-${{ github.run_id }}
         run: |
           if [ -f .env ]; then
             docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" --env-file .env -f deployment/compose.yaml logs --no-color
