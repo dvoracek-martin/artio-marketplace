@@ -170,6 +170,10 @@ jobs:
           else
             docker compose --project-name "$MARKETPLACE_COMPOSE_PROJECT" -f deployment/compose.yaml logs --no-color || true
           fi
+          if [ -f .env.dev ]; then
+            docker compose --project-name "$MARKETPLACE_DEV_PROJECT" --env-file .env.dev \
+              -f deployment/compose.yaml -f deployment/compose.dev.yaml logs --no-color || true
+          fi
       - name: Generate SPDX SBOM for verified image
         if: always() && !cancelled() && steps.start-stack.outcome == 'success'
         run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.28.0 artio-marketplace:local -o spdx-json=marketplace.spdx.json
