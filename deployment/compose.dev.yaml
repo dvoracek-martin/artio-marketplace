@@ -9,8 +9,11 @@ services:
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |
-        install -D -m 0400 -o 10001 -g 10001 /input/local_release_signing_key /secrets/local_release_signing_key
-        install -D -m 0400 -o 10001 -g 10001 /input/zot_importer_password /secrets/zot_importer_password
+        rm -f /secrets/local_release_signing_key /secrets/zot_importer_password
+        install -D -m 0400 /input/local_release_signing_key /secrets/local_release_signing_key
+        chown 10001:10001 /secrets/local_release_signing_key
+        install -D -m 0400 /input/zot_importer_password /secrets/zot_importer_password
+        chown 10001:10001 /secrets/zot_importer_password
     restart: "no"
     network_mode: none
     read_only: true
