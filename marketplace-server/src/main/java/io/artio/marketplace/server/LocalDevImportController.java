@@ -15,6 +15,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -34,6 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Profile("marketplace-local-dev")
 @RequestMapping("/api/v1/dev-admin/imports")
 public class LocalDevImportController {
+  private static final Logger LOGGER = LoggerFactory.getLogger(LocalDevImportController.class);
   private static final long MAX_ARCHIVE = 4L * 1024 * 1024 * 1024;
   private static final Semaphore IMPORT_SLOT = new Semaphore(1);
   private static final long MAX_QUARANTINE_TOTAL = 8L * 1024 * 1024 * 1024;
@@ -228,6 +231,7 @@ public class LocalDevImportController {
     } catch (ResponseStatusException e) {
       throw e;
     } catch (Exception failure) {
+      LOGGER.warn("Local OCI import job {} failed: {}", jobId, safeDiagnostic(failure));
       jdbc.update(
           "UPDATE marketplace_dev_import_jobs SET state='FAILED',error_code='IMPORT_FAILED',updated_at=now(),row_version=row_version+1 WHERE job_id=?::uuid",
           jobId.toString());
@@ -236,7 +240,7 @@ public class LocalDevImportController {
       } catch (IOException ignored) {
       }
       throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "OCI archive import failed: " + failure.getMessage(), failure);
+          HttpStatus.BAD_REQUEST, "OCI archive import failed: " + safeDiagnostic(failure), failure);
     } finally {
       if (!handedOff) IMPORT_SLOT.release();
     }
@@ -413,6 +417,7 @@ public class LocalDevImportController {
           jobId.toString());
       audit("STAGE_IMPORTED_ARTIFACT", jobId.toString());
     } catch (Exception failure) {
+      LOGGER.warn("Local OCI import job {} failed: {}", jobId, safeDiagnostic(failure));
       jdbc.update(
           "UPDATE marketplace_dev_import_jobs SET state='FAILED',error_code='IMPORT_FAILED',updated_at=now(),row_version=row_version+1 WHERE job_id=?::uuid",
           jobId.toString());
@@ -529,6 +534,20 @@ public class LocalDevImportController {
       while ((n = in.read(buffer)) != -1) digest.update(buffer, 0, n);
     }
     return HexFormat.of().formatHex(digest.digest());
+  }
+
+  static String safeDiagnostic(Exception failure) {
+    String message =
+        failure.getClass().getSimpleName()
+            + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
+    String sanitized =
+        message
+            .replaceAll("(?i)(basic\\s+)[A-Za-z0-9+/=]+", "$1[REDACTED]")
+            .replaceAll("(?i)(bearer\\s+)[A-Za-z0-9._~+/=-]+", "$1[REDACTED]")
+            .replaceAll("(?i)(password|token|secret)(\\s*[=:]\\s*)[^\\s,;]+", "$1$2[REDACTED]")
+            .replaceAll("(://)[^/@\\s]+:[^/@\\s]+@", "$1[REDACTED]@")
+            .replaceAll("[\\r\\n\\t]", " ");
+    return sanitized.substring(0, Math.min(512, sanitized.length()));
   }
 
   private String selectArchiveTag(LocalArchiveInspector.Inventory inventory, String requested) {
