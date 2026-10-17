@@ -60,6 +60,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .validation pre, .release-detail pre { max-height: 260px; overflow: auto; white-space: pre-wrap; }
 .release-detail { margin-top: 20px; padding-top: 12px; border-top: 1px solid #334155; }
 .release-detail code, .release-detail pre { color: #a5f3fc; font: 11px/1.6 ui-monospace, Consolas, monospace; }
+.artifact-browser { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+.artifact-browser h4 { grid-column: 1 / -1; margin: 8px 0 0; color: #a5b4fc; }
+.artifact-row, .artifact-browser figure { min-width: 0; margin: 0; padding: 12px; border: 1px solid #334155; border-radius: 9px; background: #17233b; }
+.artifact-row { display: grid; gap: 8px; }
+.artifact-browser figure img { display: block; width: 100%; max-height: 210px; object-fit: contain; border-radius: 6px; background: #0f172a; }
+.artifact-browser figcaption { display: grid; gap: 6px; margin-top: 8px; color: #94a3b8; font-size: 11px; }
+.artifact-browser code { display: block; overflow-wrap: anywhere; color: #a5f3fc; font-size: 11px; }
 .hint { margin-top: 20px; }
 .import-panel { display: grid; grid-template-columns: minmax(220px, .7fr) 2fr; align-items: start; gap: 14px; margin-bottom: 18px; }
 .import-grid { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 10px; }

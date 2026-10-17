@@ -158,6 +158,19 @@ test('searches and filters catalog entries, then browses release states', async 
       await route.fulfill({ json: { metadata: { title: { en: 'Analytics' } }, version: 1 } });
     } else if (path === `/api/v1/dev-admin/plugins/${pluginId}/revisions` && method === 'GET') {
       await route.fulfill({ json: [] });
+    } else if (path === '/api/v1/dev-admin/releases/r2' && method === 'GET') {
+      await route.fulfill({ json: {
+        releaseId: 'r2', pluginId, version: '2.0.0', state: 'PUBLISHED', approvalState: 'APPROVED',
+        rowVersion: 1, manifestSha256: 'sha256:manifest',
+        manifest: { image: 'localhost:15000/public/plugins/com.example.analytics/main@sha256:' + '1'.repeat(64), services: [{ id: 'worker', image: 'localhost:15000/public/plugins/com.example.analytics/worker@sha256:' + '2'.repeat(64) }] },
+        catalog: { icon: 'sha256-' + '3'.repeat(64), screenshots: [{ assetId: 'sha256-' + '4'.repeat(64), order: 0, alt: { en: 'Analytics preview' }, caption: { en: 'Dashboard preview' } }] },
+      } });
+    } else if (path.startsWith('/api/v1/marketplace/assets/') && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDvkAAAAASUVORK5CYII=', 'base64'),
+      });
     } else {
       await route.fulfill({ status: 404, json: { error: `Unexpected browser-test request ${method} ${path}` } });
     }
@@ -187,4 +200,13 @@ test('searches and filters catalog entries, then browses release states', async 
   await page.locator('.release-filter select').first().selectOption('PUBLISHED');
   await expect(page.getByText('v2.0.0')).toBeVisible();
   await expect(page.getByText('v1.0.0')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Detail' }).click();
+  await expect(page.getByRole('heading', { name: 'com.example.analytics · 2.0.0' })).toBeVisible();
+  await expect(page.getByText('localhost:15000/public/plugins/com.example.analytics/main@sha256:' + '1'.repeat(64), { exact: true })).toBeVisible();
+  await expect(page.getByText('localhost:15000/public/plugins/com.example.analytics/worker@sha256:' + '2'.repeat(64), { exact: true })).toBeVisible();
+  const mediaImages = page.locator('.artifact-browser img');
+  await expect(mediaImages).toHaveCount(2);
+  await expect.poll(() => mediaImages.first().evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect.poll(() => mediaImages.nth(1).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(page.getByText('Screenshot 1')).toBeVisible();
 });
