@@ -51,12 +51,71 @@ csrf_status=$(curl --silent --show-error -o "$tmp/csrf-response.json" -w '%{http
   -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H 'Content-Type: application/json' \
   -X POST -d '{}' "$api_base/api/v1/dev-admin/imports")
 [[ "$csrf_status" == 403 ]]
-echo 'CSRF rejection passed.'
+wrong_origin_status=$(curl --silent --show-error -o "$tmp/origin-response.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H 'Origin: http://attacker.example' \
+  -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -X POST -d '{}' "$api_base/api/v1/dev-admin/imports")
+[[ "$wrong_origin_status" == 403 ]]
+forged_host_status=$(curl --silent --show-error -o "$tmp/host-response.html" -w '%{http_code}' \
+  -H 'Host: marketplace.attacker.example' -H 'Origin: http://marketplace.attacker.example' \
+  "$api_base/api/v1/dev-admin/session")
+[[ "$forged_host_status" == 404 ]]
+forwarded_host_status=$(curl --silent --show-error -o "$tmp/forwarded-response.html" -w '%{http_code}' \
+  -H 'X-Forwarded-Host: 127.0.0.1' "$api_base/api/v1/dev-admin/session")
+[[ "$forwarded_host_status" == 404 ]]
+echo 'CSRF, cross-origin POST, forged Host and forwarded-host rejection passed.'
 
 docker build --quiet --build-arg ARTIO_REFERENCE_VERSION=1.0.0 \
   --tag "$image" examples/reference-plugin >/dev/null
 docker save --output "$tmp/fixture.tar" "$image"
+password=$(<"$importer_password_file")
 echo "Docker-save fixture created ($(stat -c '%s' "$tmp/fixture.tar") bytes)."
+
+# A validly streamed tar with a hostile path must fail inspection before either
+# staging or public Zot receives an image manifest.
+python3 - "$tmp/hostile-path.tar" <<'PY'
+import io
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], 'w') as archive:
+    entry = tarfile.TarInfo('../../escape')
+    entry.size = 7
+    archive.addfile(entry, io.BytesIO(b'blocked'))
+PY
+hostile_job_payload=$(jq -cn --arg image "$image" \
+  '{pluginId:"com.example.hostile-archive",version:"1.0.0",role:"MAIN",archiveTag:$image}')
+hostile_job=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-hostile-$(openssl rand -hex 12)" \
+  --data-binary "$hostile_job_payload" "$api_base/api/v1/dev-admin/imports")
+hostile_job_id=$(jq -r .jobId <<<"$hostile_job")
+hostile_upload_status=$(curl --silent --show-error -o "$tmp/hostile-upload.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: hostile-path.tar' \
+  -H "X-Archive-Image: $image" -X PUT --data-binary "@$tmp/hostile-path.tar" \
+  "$api_base/api/v1/dev-admin/imports/$hostile_job_id/archive")
+[[ "$hostile_upload_status" == 202 ]]
+hostile_state=''
+for _ in $(seq 1 60); do
+  hostile_result=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+    "$api_base/api/v1/dev-admin/imports/$hostile_job_id")
+  hostile_state=$(jq -r .state <<<"$hostile_result")
+  [[ "$hostile_state" == FAILED || "$hostile_state" == STAGED ]] && break
+  sleep 2
+done
+[[ "$hostile_state" == FAILED ]]
+hostile_staging_tag="import-${hostile_job_id//-/}"
+hostile_staging_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head \
+  -u "oci-importer:$password" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+  "http://127.0.0.1:$registry_port/v2/staging/plugins/com.example.hostile-archive/1.0.0/main/manifests/$hostile_staging_tag")
+[[ "$hostile_staging_status" == 404 ]]
+hostile_public_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' --head \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+  "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.hostile-archive/1.0.0/main/manifests/$hostile_staging_tag")
+[[ "$hostile_public_status" == 404 ]]
+echo 'Hostile archive path was rejected before creating private or public Zot manifests.'
 
 job_payload=$(jq -cn --arg image "$image" \
   '{pluginId:"com.example.dev-import",version:"1.0.0",role:"MAIN",archiveTag:$image}')
@@ -97,7 +156,6 @@ reference=$(jq -r .image <<<"$result")
 [[ "$reference" =~ @sha256:[a-f0-9]{64}$ ]]
 digest=${reference##*@}
 staging_tag="import-${job_id//-/}"
-password=$(<"$importer_password_file")
 curl --silent --show-error --fail --head \
   -u "oci-importer:$password" \
   -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
