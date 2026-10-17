@@ -404,5 +404,101 @@ curl --silent --show-error --fail \
   "$api_base/api/v1/marketplace/plugins/com.example.dev-import/releases/1.0.0/manifest" \
   | jq -e --arg main "$reference" --arg companion "$sidecar_reference" \
     '.image == $main and .services[0].id == "companion" and .services[0].image == $companion' >/dev/null
+
+# A new never-approved draft may be removed; published history and its public
+# digest must remain protected from physical deletion.
+draft_manifest=$(jq '.version="1.0.1"' "$tmp/manifest.json")
+draft_catalog=$(jq '.title.en="Draft deletion acceptance"' \
+  "$tmp/catalog-with-asset.json")
+jq -cn --argjson manifest "$draft_manifest" --argjson catalog "$draft_catalog" \
+  '{manifest:$manifest,catalog:$catalog}' > "$tmp/delete-draft-submission.json"
+draft_validation=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  --data-binary "@$tmp/delete-draft-submission.json" \
+  "$api_base/api/v1/dev-admin/releases/validate")
+jq -e '.valid == true and (.errors | length == 0)' <<<"$draft_validation" >/dev/null
+delete_draft=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-delete-draft-$(openssl rand -hex 12)" \
+  --data-binary "@$tmp/delete-draft-submission.json" \
+  "$api_base/api/v1/dev-admin/releases")
+delete_draft_id=$(jq -r .releaseId <<<"$delete_draft")
+draft_delete_status=$(curl --silent --show-error -o "$tmp/delete-draft.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -X DELETE "$api_base/api/v1/dev-admin/releases/$delete_draft_id")
+[[ "$draft_delete_status" == 200 ]]
+draft_audit=$(docker compose --project-name "${MARKETPLACE_DEV_PROJECT:?}" \
+  --env-file "${MARKETPLACE_DEV_ENV_FILE:?}" -f deployment/compose.yaml \
+  -f deployment/compose.dev.yaml exec -T postgres psql -U artio_marketplace \
+  -d artio_marketplace -Atqc "SELECT action || ':' || target FROM marketplace_audit WHERE action='DELETE_DRAFT' ORDER BY audit_id DESC LIMIT 1")
+grep -q 'DELETE_DRAFT:com.example.dev-import@1.0.1' <<<"$draft_audit"
+published_delete_status=$(curl --silent --show-error -o "$tmp/delete-published.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -X DELETE "$api_base/api/v1/dev-admin/releases/$release_id")
+[[ "$published_delete_status" == 409 ]]
+plugin_delete_status=$(curl --silent --show-error -o "$tmp/delete-plugin.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -X DELETE "$api_base/api/v1/dev-admin/plugins/com.example.dev-import")
+[[ "$plugin_delete_status" == 409 ]]
+empty_plugin_id='com.example.empty-delete'
+empty_import_payload=$(jq -cn --arg id "$empty_plugin_id" --arg image "$sidecar_image" \
+  '{pluginId:$id,version:"1.0.0",role:"MAIN",archiveTag:$image}')
+empty_import=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-empty-import-$(openssl rand -hex 12)" \
+  --data-binary "$empty_import_payload" "$api_base/api/v1/dev-admin/imports")
+empty_job_id=$(jq -r .jobId <<<"$empty_import")
+[[ "$empty_job_id" =~ ^[0-9a-f-]{36}$ ]]
+empty_upload_status=$(curl --silent --show-error -o "$tmp/empty-upload.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" \
+  -H 'Content-Type: application/octet-stream' -H 'X-Archive-Name: empty-plugin-oci.tar' \
+  -H "X-Archive-Image: $sidecar_image" -X PUT --data-binary "@$tmp/sidecar-oci.tar" \
+  "$api_base/api/v1/dev-admin/imports/$empty_job_id/archive")
+[[ "$empty_upload_status" == 202 ]]
+empty_state=''
+for _ in $(seq 1 300); do
+  empty_result=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+    "$api_base/api/v1/dev-admin/imports/$empty_job_id")
+  empty_state=$(jq -r .state <<<"$empty_result")
+  [[ "$empty_state" == STAGED || "$empty_state" == FAILED ]] && break
+  sleep 2
+done
+[[ "$empty_state" == STAGED ]]
+empty_reference=$(jq -r .image <<<"$empty_result")
+empty_manifest=$(jq --arg id "$empty_plugin_id" --arg image "$empty_reference" \
+  '.id=$id | .name="Empty plugin deletion acceptance" | .version="1.0.0" | .image=$image | .services=[]' \
+  "$tmp/manifest.json")
+empty_catalog=$(jq '.slug="empty-plugin-delete-acceptance" | .title.en="Empty plugin deletion acceptance"' \
+  "$tmp/catalog-with-asset.json")
+jq -cn --argjson manifest "$empty_manifest" --argjson catalog "$empty_catalog" \
+  '{manifest:$manifest,catalog:$catalog}' > "$tmp/empty-plugin-submission.json"
+empty_validation=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  --data-binary "@$tmp/empty-plugin-submission.json" "$api_base/api/v1/dev-admin/releases/validate")
+jq -e '.valid == true and (.errors | length == 0)' <<<"$empty_validation" >/dev/null
+empty_draft=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: dev-admin-empty-draft-$(openssl rand -hex 12)" \
+  --data-binary "@$tmp/empty-plugin-submission.json" "$api_base/api/v1/dev-admin/releases")
+empty_release_id=$(jq -r .releaseId <<<"$empty_draft")
+curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X DELETE \
+  "$api_base/api/v1/dev-admin/releases/$empty_release_id" >/dev/null
+curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X DELETE \
+  "$api_base/api/v1/dev-admin/plugins/$empty_plugin_id" \
+  | jq -e --arg plugin "$empty_plugin_id" '.deleted == true and .pluginId == $plugin' >/dev/null
+empty_audit=$(docker compose --project-name "${MARKETPLACE_DEV_PROJECT:?}" \
+  --env-file "${MARKETPLACE_DEV_ENV_FILE:?}" -f deployment/compose.yaml \
+  -f deployment/compose.dev.yaml exec -T postgres psql -U artio_marketplace \
+  -d artio_marketplace -Atqc "SELECT action || ':' || target FROM marketplace_audit WHERE action='DELETE_EMPTY_PLUGIN' ORDER BY audit_id DESC LIMIT 1")
+grep -q "DELETE_EMPTY_PLUGIN:$empty_plugin_id" <<<"$empty_audit"
+empty_plugin_public_status=$(curl --silent --show-error -o /dev/null -w '%{http_code}' \
+  "$api_base/api/v1/marketplace/plugins/$empty_plugin_id")
+[[ "$empty_plugin_public_status" == 404 ]]
+curl --silent --show-error --fail --head \
+  -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+  "http://127.0.0.1:$registry_port/v2/public/plugins/com.example.dev-import/1.0.0/main/manifests/$digest" >/dev/null
+echo 'Never-approved draft and empty-plugin deletion/audit passed; published release/plugin deletion was rejected and the public OCI digest remained available.'
 echo 'Local admin publication passed: staged OCI digest promoted publicly, release signed, descriptor and Core manifest available.'
 echo 'Local admin UI, CSRF boundary, Docker-save streaming import, multi-platform OCI sidecar upload and amd64/arm64 pulls, release validation, icon/screenshot media, approval, promotion, public catalog rendering and descriptor signing passed.'
