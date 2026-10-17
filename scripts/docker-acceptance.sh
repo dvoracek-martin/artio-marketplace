@@ -169,13 +169,14 @@ resolve_digest() {
     awk 'BEGIN{IGNORECASE=1} /^Docker-Content-Digest:/ {gsub("\r", ""); print $2}'
 }
 
-for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
+for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1 1.4.0; do
   runtime_version=1
   [[ $version == 1.3.0 ]] && runtime_version=2
+  [[ $version == 1.4.0 ]] && runtime_version=3
   main_tag="$publisher_registry/staging/plugins/artio-reference:$version"
   sidecar_tag="$publisher_registry/staging/plugins/artio-reference-companion:$version"
   tags+=("$main_tag" "$sidecar_tag")
-  if [[ $version == 1.3.0 ]]; then
+  if [[ $version == 1.3.0 || $version == 1.4.0 ]]; then
     # Exercise Zot promotion of an OCI index and both child platform manifests.
     main_tag_amd64="$publisher_registry/staging/plugins/artio-reference:$version-amd64"
     main_tag_arm64="$publisher_registry/staging/plugins/artio-reference:$version-arm64"
@@ -258,7 +259,7 @@ for version in 1.2.0 1.3.0 1.2.9 1.4.0-rc.1; do
   mkdir -p "$release_dir/media"
   maximum_core=9.9.9
   [[ $version == 1.2.9 ]] && maximum_core=0.5.0
-  if [[ $version == 1.3.0 ]]; then
+  if [[ $version == 1.3.0 || $version == 1.4.0 ]]; then
     cat >"$release_dir/manifest.json" <<JSON
 {
   "packageManifest": {
@@ -419,22 +420,22 @@ base = sys.argv[1]
 def get(path):
     with urllib.request.urlopen(base + path) as response:
         return json.load(response)
-assert get('/api/v1/marketplace/plugins/marketplace.reference')['version'] == '1.3.0'
+assert get('/api/v1/marketplace/plugins/marketplace.reference')['version'] == '1.4.0'
 releases = get('/api/v1/marketplace/plugins/marketplace.reference/releases?size=10')
-assert [r['version'] for r in releases['content']] == ['1.3.0', '1.2.9', '1.2.0']
+assert [r['version'] for r in releases['content']] == ['1.4.0', '1.3.0', '1.2.9', '1.2.0']
 preview = get('/api/v1/marketplace/plugins/marketplace.reference/releases?includePrerelease=true&size=10')
-assert [r['version'] for r in preview['content']] == ['1.4.0-rc.1', '1.3.0', '1.2.9', '1.2.0']
+assert [r['version'] for r in preview['content']] == ['1.4.0', '1.4.0-rc.1', '1.3.0', '1.2.9', '1.2.0']
 compatible = get('/api/v1/marketplace/plugins/marketplace.reference/releases?coreVersion=1.0.0&size=10')
-assert [r['version'] for r in compatible['content']] == ['1.3.0', '1.2.0']
-assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0')['version'] == '1.3.0'
-assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0&includePrerelease=true')['version'] == '1.4.0-rc.1'
+assert [r['version'] for r in compatible['content']] == ['1.4.0', '1.3.0', '1.2.0']
+assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0')['version'] == '1.4.0'
+assert get('/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0&includePrerelease=true')['version'] == '1.4.0'
 filtered = get('/api/v1/marketplace/plugins?category=other&country=CH&coreVersion=1.0.0&size=1')
-assert filtered['totalElements'] == 1 and filtered['content'][0]['version'] == '1.3.0'
+assert filtered['totalElements'] == 1 and filtered['content'][0]['version'] == '1.4.0'
 assert get('/api/v1/marketplace/plugins?category=payments')['totalElements'] == 0
 searched = get('/api/v1/marketplace/plugins?q=marketplace.reference&category=other&size=1')
 assert searched['totalElements'] == 1 and searched['content'][0]['pluginId'] == 'marketplace.reference'
 preview_card = get('/api/v1/marketplace/plugins?category=other&coreVersion=1.0.0&includePrerelease=true&size=1')
-assert preview_card['content'][0]['version'] == '1.4.0-rc.1'
+assert preview_card['content'][0]['version'] == '1.4.0'
 PY
 echo 'SemVer release selection checks passed.'
 revocation_token=$(cat "$MARKETPLACE_REVOCATION_TOKEN_FILE")
@@ -516,7 +517,7 @@ if [[ -n $release_id_129 ]]; then
   revoked_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
     "$base/api/v1/marketplace/plugins/marketplace.reference/releases/1.2.9/manifest")
   [[ $revoked_status == 410 ]] || { echo 'Revoked release did not return HTTP 410.' >&2; exit 1; }
-  [[ $(curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0" | "$python" -c 'import json,sys;print(json.load(sys.stdin)["version"])') == 1.3.0 ]] || { echo 'Revoking an older release affected the latest release.' >&2; exit 1; }
+  [[ $(curl --fail --silent "$base/api/v1/marketplace/plugins/marketplace.reference/latest-compatible?coreVersion=1.0.0" | "$python" -c 'import json,sys;print(json.load(sys.stdin)["version"])') == 1.4.0 ]] || { echo 'Revoking an older release affected the latest release.' >&2; exit 1; }
   verify_advisory_feed 1.2.9
 fi
 echo 'Moderation, release-scoped revocation and catalog checks passed.'
@@ -621,6 +622,8 @@ if [[ -n ${ARTIO_CORE_PATH:-} ]]; then
   export ARTIO_MARKETPLACE_BASE_URL=${ARTIO_MARKETPLACE_BASE_URL:-$base}
   export ARTIO_MARKETPLACE_TEST_PLUGIN_ID=marketplace.reference
   export ARTIO_MARKETPLACE_TEST_PLUGIN_VERSION=1.3.0
+  export ARTIO_MARKETPLACE_UPDATE_PLUGIN_VERSION=1.4.0
+  export ARTIO_TEST_EXTENSION_IMAGE_V3=${release_refs[4]}
   export ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_ID=marketplace.reference
   export ARTIO_MARKETPLACE_EXPECTED_BANNED_PLUGIN_VERSION=1.2.9
   signing_public_key=$(openssl pkey -in "$MARKETPLACE_SIGNING_PRIVATE_KEY_FILE" -pubout -outform DER | base64 -w0 | tr '+/' '-_' | tr -d '=')

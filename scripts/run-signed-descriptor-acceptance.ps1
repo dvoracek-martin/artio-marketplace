@@ -24,6 +24,7 @@ $testBaseImages = @(
   'postgres@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea',
   'eclipse-temurin:25-jdk-noble@sha256:589ff4cc3f71aab462e7048a47a0d10edf57fbccde3fceea2281e610bf5880b4',
   'eclipse-temurin:25-jre-noble@sha256:d9a39a23634650173f1e2bbc176227af9728587ecf0f4b62d53e9355cd7a19ab',
+  'eclipse-temurin:25-jre@sha256:fd4b1c02c64eef378212e23656fc0b0caa41a357876fa0b60e51ceda94a3db64',
   'ghcr.io/project-zot/zot@sha256:96cda11459ce6f8c60da3b03f03e9f67fd11b3ae2d82c4c04c92b3c608996080'
 )
 $testBaseImagesAbsentBefore = [System.Collections.Generic.List[string]]::new()
@@ -220,7 +221,10 @@ try {
     }
   }
   if (-not $htpasswdImageExisted) { docker image rm httpd:2.4-alpine 2>$null | Out-Null }
-  foreach ($image in $testBaseImagesAbsentBefore) { docker image rm $image 2>$null | Out-Null }
+  foreach ($image in $testBaseImagesAbsentBefore) {
+    $imageId = docker image inspect $image --format '{{.Id}}' 2>$null
+    if ($LASTEXITCODE -eq 0 -and $imageId) { docker image rm --force $imageId.Trim() 2>$null | Out-Null }
+  }
   $tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
   $target = [IO.Path]::GetFullPath($taskTemp)
   if ($target.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Leaf $target).StartsWith('artio-marketplace-signed-descriptor-', [StringComparison]::Ordinal)) {
