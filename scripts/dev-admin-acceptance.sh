@@ -342,6 +342,13 @@ echo 'Import, unapproved release draft, and quarantine/Zot media state persisted
 
 plugin_before_approval=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   "$api_base/api/v1/dev-admin/plugins")
+admin_plugin_page=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  "$api_base/api/v1/dev-admin/plugins/page?page=0&size=1&q=com.example.dev-import&category=ALL&moderation=ACTIVE")
+jq -e '.page == 0 and .size == 1 and .totalElements >= 1 and .totalPages >= 1 and (.content | length) == 1 and .content[0].pluginId == "com.example.dev-import"' \
+  <<<"$admin_plugin_page" >/dev/null || {
+  echo "Server-side admin plugin search/pagination failed: $admin_plugin_page" >&2
+  exit 1
+}
 plugin_moderation=$(jq -r '.[] | select(.pluginId == "com.example.dev-import") | .moderationState' \
   <<<"$plugin_before_approval")
 [[ "$plugin_moderation" == ACTIVE ]] || {

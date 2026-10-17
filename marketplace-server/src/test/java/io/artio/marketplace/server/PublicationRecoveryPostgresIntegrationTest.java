@@ -134,6 +134,47 @@ class PublicationRecoveryPostgresIntegrationTest {
   }
 
   @Test
+  void devAdminPluginPageSearchesAndPaginatesAgainstPostgres() {
+    jdbc.update(
+        "INSERT INTO marketplace_plugins(plugin_id,slug,vendor) VALUES (?,?,?)",
+        "zzz.other.test",
+        "recovery-test-2",
+        "Artio");
+    var admin =
+        new DevAdminController(
+            jdbc,
+            null,
+            null,
+            null,
+            null,
+            new ObjectMapper(),
+            "http://127.0.0.1:5000",
+            "localhost:5000");
+
+    var firstPage = admin.pluginPage(0, 1, PLUGIN_ID, "ALL", "ACTIVE");
+    assertThat(firstPage)
+        .containsEntry("page", 0)
+        .containsEntry("size", 1)
+        .containsEntry("totalElements", 1L);
+    assertThat(firstPage.get("totalPages")).isEqualTo(1L);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> content = (List<Map<String, Object>>) firstPage.get("content");
+    assertThat(content)
+        .singleElement()
+        .satisfies(plugin -> assertThat(plugin.get("pluginId")).isEqualTo(PLUGIN_ID));
+
+    var nextPage = admin.pluginPage(1, 1, "", "ALL", "ACTIVE");
+    assertThat(nextPage).containsEntry("page", 1).containsEntry("totalElements", 2L);
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> secondPage = (List<Map<String, Object>>) nextPage.get("content");
+    assertThat(secondPage)
+        .singleElement()
+        .satisfies(plugin -> assertThat(plugin.get("pluginId")).isEqualTo("zzz.other.test"));
+    assertThatThrownBy(() -> admin.pluginPage(0, 101, "", "ALL", "ALL"))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+  }
+
+  @Test
   void partialCopyFailureLeavesRetryableJobAndRetryPublishesTheSameApprovedRelease() {
     doAnswer(
             invocation -> {

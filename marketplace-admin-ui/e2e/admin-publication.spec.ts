@@ -17,8 +17,8 @@ test('drives archive selection, import and publication controls through the admi
 
     if (path === '/api/v1/dev-admin/session' && method === 'GET') {
       await route.fulfill({ json: { apiVersion: 'v1', csrfToken: 'browser-test-csrf-token' } });
-    } else if (path === '/api/v1/dev-admin/plugins' && method === 'GET') {
-      await route.fulfill({ json: [] });
+    } else if (path === '/api/v1/dev-admin/plugins/page' && method === 'GET') {
+      await route.fulfill({ json: { content: [], page: 0, size: 50, totalElements: 0, totalPages: 0 } });
     } else if (path === '/api/v1/dev-admin/operations' && method === 'GET') {
       await route.fulfill({ json: { api: 'UP', database: 'UP', zot: 'UP', environment: 'browser-test', apiBase: '/api/v1' } });
     } else if (path === '/api/v1/dev-admin/imports' && method === 'POST') {
@@ -142,11 +142,26 @@ test('searches and filters catalog entries, then browses release states', async 
     const method = route.request().method();
     if (path === '/api/v1/dev-admin/session' && method === 'GET') {
       await route.fulfill({ json: { apiVersion: 'v1', csrfToken: 'browser-test-csrf-token' } });
-    } else if (path === '/api/v1/dev-admin/plugins' && method === 'GET') {
-      await route.fulfill({ json: [
+    } else if (path === '/api/v1/dev-admin/plugins/page' && method === 'GET') {
+      const fixturePlugins = [
         { pluginId, slug: 'analytics', vendor: 'Example', moderationState: 'ACTIVE', releaseCount: 2, newestPublished: '2.0.0', listingRevisionVersion: 1, categories: ['analytics'] },
         { pluginId: 'com.example.security', slug: 'security', vendor: 'Example', moderationState: 'SUSPENDED', releaseCount: 1, newestPublished: '1.0.0', listingRevisionVersion: 1, categories: ['security'] },
-      ] });
+        ...Array.from({ length: 50 }, (_, index) => ({ pluginId: `com.example.other-${index}`, slug: `other-${index}`, vendor: 'Fixture', moderationState: 'ACTIVE', releaseCount: 1, newestPublished: '1.0.0', listingRevisionVersion: 1, categories: ['other'] })),
+      ];
+      const query = new URL(route.request().url()).searchParams;
+      const search = (query.get('q') ?? '').toLowerCase();
+      const category = query.get('category') ?? 'ALL';
+      const moderation = query.get('moderation') ?? 'ALL';
+      const matchingPlugins = fixturePlugins.filter((plugin) =>
+        (!search || `${plugin.pluginId} ${plugin.slug} ${plugin.vendor}`.toLowerCase().includes(search))
+        && (category === 'ALL' || plugin.categories.includes(category))
+        && (moderation === 'ALL' || plugin.moderationState === moderation));
+      const page = Number(query.get('page') ?? '0');
+      const size = Number(query.get('size') ?? '50');
+      await route.fulfill({ json: {
+        content: matchingPlugins.slice(page * size, (page + 1) * size), page, size,
+        totalElements: matchingPlugins.length, totalPages: Math.ceil(matchingPlugins.length / size),
+      } });
     } else if (path === '/api/v1/dev-admin/operations' && method === 'GET') {
       await route.fulfill({ json: { api: 'UP', database: 'UP', zot: 'UP', environment: 'browser-test', apiBase: '/api/v1' } });
     } else if (path === `/api/v1/dev-admin/plugins/${pluginId}/releases` && method === 'GET') {
@@ -199,6 +214,10 @@ test('searches and filters catalog entries, then browses release states', async 
   await expect(analyticsPlugin).toHaveCount(0);
 
   await page.getByLabel('Moderace').selectOption('ALL');
+  await expect(page.locator('.pagination span')).toHaveText('Strana 1 / 2 · 52 pluginů');
+  await page.getByRole('button', { name: 'Další' }).click();
+  await expect(page.locator('.pagination span')).toHaveText('Strana 2 / 2 · 52 pluginů');
+  await page.getByRole('button', { name: 'Předchozí' }).click();
   await analyticsPlugin.click();
   await expect(page.getByText('v2.0.0')).toBeVisible();
   await expect(page.getByText('v1.0.0')).toBeVisible();

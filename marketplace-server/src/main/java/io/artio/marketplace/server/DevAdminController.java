@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -132,6 +133,86 @@ public class DevAdminController {
                 Map.entry("releaseCount", rs.getLong(8)),
                 Map.entry("newestPublished", rs.getString(9) == null ? "" : rs.getString(9)),
                 Map.entry("categories", stringList(rs.getString(10)))));
+  }
+
+  @GetMapping("/plugins/page")
+  public Map<String, Object> pluginPage(
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int size,
+      @RequestParam(defaultValue = "") String q,
+      @RequestParam(defaultValue = "ALL") String category,
+      @RequestParam(defaultValue = "ALL") String moderation) {
+    if (page < 0 || size < 1 || size > 100) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Invalid plugin page or page size.");
+    }
+    String normalizedQuery = q == null ? "" : q.trim();
+    String search = "%" + normalizedQuery + "%";
+    String normalizedCategory = category == null ? "ALL" : category;
+    String normalizedModeration = moderation == null ? "ALL" : moderation;
+    String from =
+        """
+        FROM marketplace_plugins p
+        LEFT JOIN marketplace_listing_revisions lr ON lr.revision_id=p.effective_listing_revision_id AND lr.approval_state='APPROVED'
+        LEFT JOIN LATERAL (SELECT r.metadata FROM marketplace_releases r WHERE r.plugin_id=p.plugin_id AND r.publication_state IN ('PUBLISHED','UNLISTED') ORDER BY marketplace_semver_sort_key(r.version) DESC,r.version COLLATE "C" DESC LIMIT 1) latest ON true
+        CROSS JOIN LATERAL (SELECT coalesce(lr.metadata,latest.metadata,'{}'::jsonb) AS metadata) listing
+        WHERE (? = '' OR concat_ws(' ',p.plugin_id,p.slug,p.vendor,listing.metadata::text) ILIKE ?)
+          AND (? = 'ALL' OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(listing.metadata->'categories','[]'::jsonb)) category(value) WHERE category.value = ?))
+          AND (? = 'ALL' OR p.moderation_state = ?)
+        """;
+    List<Object> parameters =
+        List.of(
+            normalizedQuery,
+            search,
+            normalizedCategory,
+            normalizedCategory,
+            normalizedModeration,
+            normalizedModeration);
+    Long total = jdbc.queryForObject("SELECT count(*) " + from, Long.class, parameters.toArray());
+    List<Map<String, Object>> content =
+        jdbc.query(
+            """
+            SELECT p.plugin_id,p.slug,p.vendor,p.moderation_state,p.moderation_review_reason,
+              p.listing_revision_version,p.effective_listing_revision_id::text,
+              (SELECT count(*) FROM marketplace_releases r WHERE r.plugin_id=p.plugin_id) AS release_count,
+              (SELECT r.version FROM marketplace_releases r WHERE r.plugin_id=p.plugin_id AND r.publication_state='PUBLISHED' ORDER BY marketplace_semver_sort_key(r.version) DESC,r.version COLLATE "C" DESC LIMIT 1) AS newest_published,
+              coalesce(listing.metadata->'categories','[]'::jsonb)::text AS categories,
+              coalesce(listing.metadata->'title','{}'::jsonb)::text AS title,
+              coalesce(listing.metadata->>'author','') AS author,
+              coalesce(listing.metadata->'tags','[]'::jsonb)::text AS tags
+            """
+                + from
+                + " ORDER BY p.plugin_id LIMIT ? OFFSET ?",
+            (rs, n) ->
+                Map.<String, Object>ofEntries(
+                    Map.entry("pluginId", rs.getString(1)),
+                    Map.entry("slug", rs.getString(2)),
+                    Map.entry("vendor", rs.getString(3)),
+                    Map.entry("moderationState", rs.getString(4)),
+                    Map.entry("moderationReason", rs.getString(5) == null ? "" : rs.getString(5)),
+                    Map.entry("listingRevisionVersion", rs.getLong(6)),
+                    Map.entry(
+                        "effectiveRevisionId", rs.getString(7) == null ? "" : rs.getString(7)),
+                    Map.entry("releaseCount", rs.getLong(8)),
+                    Map.entry("newestPublished", rs.getString(9) == null ? "" : rs.getString(9)),
+                    Map.entry("categories", stringList(rs.getString(10))),
+                    Map.entry("title", jsonObject(rs.getString(11))),
+                    Map.entry("author", rs.getString(12)),
+                    Map.entry("tags", stringList(rs.getString(13)))),
+            concat(parameters, List.of((Object) size, (long) page * size)).toArray());
+    long elementCount = total == null ? 0 : total;
+    return Map.of(
+        "content", content,
+        "page", page,
+        "size", size,
+        "totalElements", elementCount,
+        "totalPages", (elementCount + size - 1) / size);
+  }
+
+  private List<Object> concat(List<Object> first, List<Object> second) {
+    java.util.ArrayList<Object> all = new java.util.ArrayList<>(first);
+    all.addAll(second);
+    return all;
   }
 
   @GetMapping("/plugins/{pluginId}/releases")
