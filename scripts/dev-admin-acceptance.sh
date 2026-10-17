@@ -271,10 +271,25 @@ for route in \
 done
 echo 'Import, unapproved release draft, and quarantine/Zot media state persisted over Marketplace restart; public routes stayed hidden.'
 
-curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+plugin_before_approval=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
+  "$api_base/api/v1/dev-admin/plugins")
+plugin_moderation=$(jq -r '.[] | select(.pluginId == "com.example.dev-import") | .moderationState' \
+  <<<"$plugin_before_approval")
+[[ "$plugin_moderation" == ACTIVE ]] || {
+  echo "Plugin moderation blocks the acceptance approval: $plugin_before_approval" >&2
+  exit 1
+}
+approval_status=$(curl --silent --show-error -o "$tmp/approval.json" -w '%{http_code}' \
+  -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -H 'Content-Type: application/json' \
   -d '{"reason":"Isolated local admin acceptance review"}' \
-  "$api_base/api/v1/dev-admin/releases/$release_id/approve" >/dev/null
+  "$api_base/api/v1/dev-admin/releases/$release_id/approve")
+[[ "$approval_status" == 200 ]] || {
+  echo "Local dev release approval returned HTTP $approval_status: $(cat "$tmp/approval.json")" >&2
+  echo "Release state: $release_after_restart" >&2
+  echo "Plugin state: $plugin_before_approval" >&2
+  exit 1
+}
 published=$(curl --silent --show-error --fail -b "$tmp/cookies/session.txt" \
   -H "Origin: $api_base" -H "X-Artio-CSRF: $csrf" -X POST \
   "$api_base/api/v1/dev-admin/releases/$release_id/publish")
